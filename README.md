@@ -17,15 +17,13 @@ A slither.io-inspired multiplayer snake game with neon visuals, smooth networkin
 
 - [Node.js](https://nodejs.org/) v16 or later
 
-### Install & Run
+### Play Online
 
-```bash
-cd snake.io-work
-npm install
-npm start
-```
+**https://gravityst.github.io/snake.io/**
 
-Open your browser to **http://localhost:3000** and play.
+### Run Locally
+
+Just open `index.html` in your browser — no server needed.
 
 ### Controls
 
@@ -37,15 +35,10 @@ Open your browser to **http://localhost:3000** and play.
 ## Architecture
 
 ```
-snake.io-work/
-├── server/
-│   ├── index.js        # Express + WebSocket server setup
-│   └── game.js         # Authoritative game loop, physics, collisions
-├── public/
-│   ├── index.html      # UI: start screen, death screen, HUD
-│   └── game.js         # Canvas renderer, networking, input, particles
-└── package.json
+snake.io/
+├── index.html    # UI: start screen, death screen, HUD
+├── game.js       # Game engine, renderer, AI bots, input
+└── README.md
 ```
 
-- **Server** runs a 30Hz game loop, handles collision detection, food spawning, and broadcasts viewport-filtered binary state to each client
-- **Client** renders with Canvas 2D, interpolates state, and sends mouse direction + boost input
+Fully client-side — game logic, AI bots, Canvas rendering, and input all run in the browser.
