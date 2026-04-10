@@ -18,6 +18,53 @@
       top: 0; left: 0;
     }
 
+    /* Glass button base */
+    .glass-btn {
+      padding: 14px 40px;
+      font-size: 20px;
+      font-weight: bold;
+      border: 1.5px solid rgba(0, 255, 255, 0.5);
+      border-radius: 30px;
+      background: linear-gradient(
+        135deg,
+        rgba(0, 255, 255, 0.08) 0%,
+        rgba(0, 136, 255, 0.12) 50%,
+        rgba(0, 255, 255, 0.06) 100%
+      );
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      color: #fff;
+      cursor: pointer;
+      letter-spacing: 2px;
+      transition: transform 0.2s, border-color 0.3s, box-shadow 0.3s, background 0.3s;
+      text-shadow: 0 0 8px rgba(0, 255, 255, 0.4);
+      position: relative;
+      overflow: hidden;
+    }
+    .glass-btn::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 50%;
+      background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 100%);
+      border-radius: 30px 30px 0 0;
+      pointer-events: none;
+    }
+    .glass-btn:hover {
+      transform: scale(1.05);
+      border-color: rgba(0, 255, 255, 0.8);
+      box-shadow: 0 0 25px rgba(0, 255, 255, 0.25), inset 0 0 20px rgba(0, 255, 255, 0.06);
+      background: linear-gradient(
+        135deg,
+        rgba(0, 255, 255, 0.14) 0%,
+        rgba(0, 136, 255, 0.18) 50%,
+        rgba(0, 255, 255, 0.10) 100%
+      );
+    }
+    .glass-btn:active {
+      transform: scale(0.97);
+    }
+
     /* Start screen */
     #startScreen {
       position: fixed;
@@ -40,40 +87,113 @@
       width: 300px;
       padding: 14px 20px;
       font-size: 20px;
-      border: 2px solid rgba(0, 255, 255, 0.3);
+      border: 1.5px solid rgba(0, 255, 255, 0.3);
       border-radius: 30px;
-      background: rgba(0, 20, 40, 0.8);
+      background: rgba(0, 20, 40, 0.5);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       color: #fff;
       text-align: center;
       outline: none;
       margin-bottom: 20px;
-      transition: border-color 0.3s;
+      transition: border-color 0.3s, box-shadow 0.3s;
     }
     #startScreen input:focus {
       border-color: #0ff;
       box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
     }
-    #startScreen button {
+    #startScreen .glass-btn {
       width: 300px;
-      padding: 14px 20px;
       font-size: 22px;
-      font-weight: bold;
-      border: none;
-      border-radius: 30px;
-      background: linear-gradient(135deg, #0ff, #08f);
-      color: #0a0a1a;
-      cursor: pointer;
-      transition: transform 0.2s, box-shadow 0.2s;
-      letter-spacing: 2px;
-    }
-    #startScreen button:hover {
-      transform: scale(1.05);
-      box-shadow: 0 0 30px rgba(0, 255, 255, 0.5);
     }
     #startScreen .subtitle {
       color: rgba(255,255,255,0.4);
       margin-top: 20px;
       font-size: 14px;
+    }
+
+    /* Skin picker screen */
+    #skinScreen {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      background: radial-gradient(ellipse at center, #0d1b2a 0%, #0a0a1a 70%);
+    }
+    #skinScreen h2 {
+      font-size: 36px;
+      color: #fff;
+      text-shadow: 0 0 15px #0ff;
+      margin-bottom: 30px;
+      letter-spacing: 3px;
+    }
+    .skin-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      max-width: 520px;
+      margin-bottom: 30px;
+      padding: 0 20px;
+    }
+    .skin-card {
+      width: 110px;
+      height: 90px;
+      border: 1.5px solid rgba(255,255,255,0.15);
+      border-radius: 16px;
+      background: rgba(0, 20, 40, 0.4);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: transform 0.2s, border-color 0.3s, box-shadow 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+    .skin-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 45%;
+      background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, transparent 100%);
+      border-radius: 16px 16px 0 0;
+      pointer-events: none;
+    }
+    .skin-card:hover {
+      transform: scale(1.08);
+      border-color: rgba(0, 255, 255, 0.5);
+      box-shadow: 0 0 20px rgba(0, 255, 255, 0.15);
+    }
+    .skin-card.selected {
+      border-color: #0ff;
+      box-shadow: 0 0 25px rgba(0, 255, 255, 0.3), inset 0 0 15px rgba(0, 255, 255, 0.05);
+      background: rgba(0, 40, 60, 0.5);
+    }
+    .skin-dots {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .skin-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+    }
+    .skin-name {
+      color: rgba(255,255,255,0.6);
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .skin-back-btn {
+      padding: 10px 30px;
+      font-size: 16px;
     }
 
     /* Death screen */
@@ -98,21 +218,6 @@
       font-size: 28px;
       color: #fff;
       margin-bottom: 30px;
-    }
-    #deathScreen button {
-      padding: 14px 40px;
-      font-size: 20px;
-      font-weight: bold;
-      border: none;
-      border-radius: 30px;
-      background: linear-gradient(135deg, #0ff, #08f);
-      color: #0a0a1a;
-      cursor: pointer;
-      transition: transform 0.2s;
-      letter-spacing: 2px;
-    }
-    #deathScreen button:hover {
-      transform: scale(1.05);
     }
 
     /* HUD */
@@ -194,14 +299,21 @@
   <div id="startScreen">
     <h1>SNAKE.IO</h1>
     <input type="text" id="nameInput" placeholder="Enter your name" maxlength="16" autofocus>
-    <button id="playBtn">PLAY</button>
+    <button class="glass-btn" id="playBtn">PLAY</button>
+    <button class="glass-btn" id="skinsBtn" style="width:300px; font-size:18px; margin-top:12px; border-color: rgba(255,0,255,0.4); background: linear-gradient(135deg, rgba(255,0,255,0.08), rgba(0,136,255,0.10), rgba(255,0,255,0.06));">SKINS</button>
     <p class="subtitle">Use mouse to steer — Click or Space to boost</p>
+  </div>
+
+  <div id="skinScreen">
+    <h2>CHOOSE SKIN</h2>
+    <div class="skin-grid" id="skinGrid"></div>
+    <button class="glass-btn skin-back-btn" id="skinBackBtn">BACK</button>
   </div>
 
   <div id="deathScreen">
     <h2>YOU DIED</h2>
     <p class="score">Score: <span id="finalScore">0</span></p>
-    <button id="respawnBtn">PLAY AGAIN</button>
+    <button class="glass-btn" id="respawnBtn">PLAY AGAIN</button>
   </div>
 
   <div id="hud">

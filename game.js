@@ -1,5 +1,5 @@
 // ============================================================
-// Snake.io — Fully client-side game with AI bots
+// Snake.io — Fully client-side game with AI bots + skins
 // ============================================================
 
 (() => {
@@ -9,10 +9,14 @@
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
   const startScreen = document.getElementById('startScreen');
+  const skinScreen = document.getElementById('skinScreen');
   const deathScreen = document.getElementById('deathScreen');
   const hud = document.getElementById('hud');
   const nameInput = document.getElementById('nameInput');
   const playBtn = document.getElementById('playBtn');
+  const skinsBtn = document.getElementById('skinsBtn');
+  const skinBackBtn = document.getElementById('skinBackBtn');
+  const skinGrid = document.getElementById('skinGrid');
   const respawnBtn = document.getElementById('respawnBtn');
   const leaderboardEntries = document.getElementById('leaderboardEntries');
   const myScoreEl = document.getElementById('myScore');
@@ -39,6 +43,83 @@
     'Storm', 'Bolt', 'Ember', 'Frost', 'Nova', 'Pulse', 'Drift', 'Surge',
     'Zenith', 'Razor', 'Flux', 'Echo', 'Orbit', 'Prism', 'Hex', 'Chrome'
   ];
+
+  // --- Skins ---
+  // Each skin has a name and a colors array.
+  // Single-color = solid skin, multi-color = dots cycle through the palette.
+  const SKINS = [
+    { name: 'Cyan',       colors: ['#0ff'] },
+    { name: 'Magenta',    colors: ['#f0f'] },
+    { name: 'Lime',       colors: ['#0f0'] },
+    { name: 'Gold',       colors: ['#ff0'] },
+    { name: 'Coral',      colors: ['#f44'] },
+    { name: 'Sky',        colors: ['#08f'] },
+    { name: 'Sunset',     colors: ['#f80', '#f44', '#ff0'] },
+    { name: 'Ocean',      colors: ['#0ff', '#08f', '#04d'] },
+    { name: 'Toxic',      colors: ['#0f0', '#ff0', '#0f0'] },
+    { name: 'Neon Party', colors: ['#f0f', '#0ff', '#ff0', '#0f0'] },
+    { name: 'Fire',       colors: ['#f44', '#f80', '#ff0'] },
+    { name: 'Galaxy',     colors: ['#a0f', '#08f', '#f0f', '#0ff'] },
+    { name: 'Candy',      colors: ['#f0f', '#fff', '#f0f', '#fff'] },
+    { name: 'Ice',        colors: ['#aef', '#0ff', '#fff'] },
+    { name: 'Lava',       colors: ['#f44', '#f80', '#ff0', '#f44'] },
+    { name: 'Rainbow',    colors: ['#f44', '#f80', '#ff0', '#0f0', '#08f', '#a0f'] },
+  ];
+
+  let selectedSkin = 0;
+
+  // --- Build skin picker UI ---
+  function buildSkinGrid() {
+    skinGrid.innerHTML = '';
+    SKINS.forEach((skin, idx) => {
+      const card = document.createElement('div');
+      card.className = 'skin-card' + (idx === selectedSkin ? ' selected' : '');
+      card.dataset.idx = idx;
+
+      const dotsDiv = document.createElement('div');
+      dotsDiv.className = 'skin-dots';
+      // Show up to 6 preview dots
+      const previewCount = Math.min(skin.colors.length >= 2 ? 5 : 3, 6);
+      for (let i = 0; i < previewCount; i++) {
+        const dot = document.createElement('div');
+        dot.className = 'skin-dot';
+        const c = skin.colors[i % skin.colors.length];
+        dot.style.background = c;
+        dot.style.boxShadow = `0 0 6px ${c}`;
+        // Taper size for body feel
+        const size = i === 0 ? 16 : 14 - i;
+        dot.style.width = size + 'px';
+        dot.style.height = size + 'px';
+        dotsDiv.appendChild(dot);
+      }
+
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'skin-name';
+      nameDiv.textContent = skin.name;
+
+      card.appendChild(dotsDiv);
+      card.appendChild(nameDiv);
+
+      card.addEventListener('click', () => {
+        selectedSkin = idx;
+        document.querySelectorAll('.skin-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+      });
+
+      skinGrid.appendChild(card);
+    });
+  }
+  buildSkinGrid();
+
+  // --- Skin screen nav ---
+  skinsBtn.addEventListener('click', () => {
+    startScreen.style.display = 'none';
+    skinScreen.style.display = 'flex';
+  });
+  skinBackBtn.addEventListener('click', () => {
+    skinScreen.style.display = 'none';
+    startScreen.style.display = 'flex';
+  });
 
   // --- Game state ---
   let snakes = [];
@@ -91,6 +172,7 @@
     const name = nameInput.value.trim() || 'Player';
     initGame(name);
     startScreen.style.display = 'none';
+    skinScreen.style.display = 'none';
     deathScreen.style.display = 'none';
     hud.style.display = 'block';
     document.body.style.cursor = 'crosshair';
@@ -104,13 +186,13 @@
     particles = [];
     nextId = 1;
 
-    // Spawn player
-    const player = createSnake(playerName, false);
+    // Spawn player with selected skin
+    const player = createSnake(playerName, false, selectedSkin);
     myId = player.id;
 
-    // Spawn bots
+    // Spawn bots with random skins
     for (let i = 0; i < BOT_COUNT; i++) {
-      createSnake(BOT_NAMES[i % BOT_NAMES.length], true);
+      createSnake(BOT_NAMES[i % BOT_NAMES.length], true, Math.floor(Math.random() * SKINS.length));
     }
 
     // Spawn food
@@ -122,7 +204,7 @@
     camera.y = player.segments[0].y;
   }
 
-  function createSnake(name, isBot) {
+  function createSnake(name, isBot, skinIdx) {
     const id = nextId++;
     const angle = Math.random() * Math.PI * 2;
     const x = (Math.random() - 0.5) * MAP_SIZE * 0.6;
@@ -134,19 +216,20 @@
         y: y - Math.sin(angle) * i * SEGMENT_SPACING,
       });
     }
+    const skin = SKINS[skinIdx] || SKINS[0];
     const snake = {
       id, name, segments, angle,
       targetAngle: angle,
       boosting: false,
       score: 0,
-      color: Math.floor(Math.random() * COLORS.length),
+      skin: skinIdx,
+      // Keep a single color index for food drops / minimap (first color of skin)
+      color: COLORS.indexOf(skin.colors[0]) >= 0 ? COLORS.indexOf(skin.colors[0]) : 0,
       alive: true,
       isBot,
       boostAccum: 0,
-      // Bot AI state
       botTimer: 0,
       botWanderAngle: angle,
-      botState: 'wander', // wander, seek, flee
     };
     snakes.push(snake);
     return snake;
@@ -161,6 +244,12 @@
     };
   }
 
+  // --- Get color for a specific segment index of a snake ---
+  function getSegColor(snake, segIndex) {
+    const skin = SKINS[snake.skin] || SKINS[0];
+    return skin.colors[segIndex % skin.colors.length];
+  }
+
   // --- Bot AI ---
   function updateBotAI(snake, dt) {
     snake.botTimer -= dt;
@@ -170,27 +259,21 @@
     const head = snake.segments[0];
     const half = MAP_SIZE / 2 - 200;
 
-    // Flee from walls
     if (Math.abs(head.x) > half || Math.abs(head.y) > half) {
       snake.targetAngle = Math.atan2(-head.y, -head.x);
       snake.boosting = true;
       return;
     }
 
-    // Look for nearby food
     let closestFood = null;
     let closestDist = 400;
     for (const f of food) {
       const dx = f.x - head.x;
       const dy = f.y - head.y;
       const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < closestDist) {
-        closestDist = d;
-        closestFood = f;
-      }
+      if (d < closestDist) { closestDist = d; closestFood = f; }
     }
 
-    // Look for nearby threats (other snake heads coming toward us)
     let threatened = false;
     for (const other of snakes) {
       if (other.id === snake.id || !other.alive) continue;
@@ -199,7 +282,6 @@
       const dy = ohead.y - head.y;
       const d = Math.sqrt(dx * dx + dy * dy);
       if (d < 150) {
-        // Flee perpendicular
         snake.targetAngle = Math.atan2(-dy, -dx) + (Math.random() - 0.5) * 0.5;
         snake.boosting = d < 80;
         threatened = true;
@@ -212,7 +294,6 @@
         snake.targetAngle = Math.atan2(closestFood.y - head.y, closestFood.x - head.x);
         snake.boosting = false;
       } else {
-        // Wander
         snake.botWanderAngle += (Math.random() - 0.5) * 1.5;
         snake.targetAngle = snake.botWanderAngle;
         snake.boosting = false;
@@ -222,7 +303,6 @@
 
   // --- Physics ---
   function updateSnake(snake, dt) {
-    // Smooth turning
     let angleDiff = snake.targetAngle - snake.angle;
     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
@@ -240,7 +320,6 @@
       y: head.y + Math.sin(snake.angle) * speed * dt,
     };
 
-    // World bounds
     const half = MAP_SIZE / 2;
     if (newHead.x < -half || newHead.x > half || newHead.y < -half || newHead.y > half) {
       killSnake(snake, null);
@@ -251,7 +330,6 @@
     const targetLength = INITIAL_LENGTH + snake.score;
     while (snake.segments.length > targetLength) snake.segments.pop();
 
-    // Boost shrink
     if (snake.boosting && snake.segments.length > 5) {
       snake.boostAccum += BOOST_SHRINK_RATE * dt;
       if (snake.boostAccum >= 1) {
@@ -265,7 +343,6 @@
       }
     }
 
-    // Eat food
     for (let i = food.length - 1; i >= 0; i--) {
       const f = food[i];
       const dx = newHead.x - f.x;
@@ -309,7 +386,6 @@
     if (!snake.alive) return;
     snake.alive = false;
 
-    // Drop food orbs
     for (let i = 0; i < snake.segments.length; i += 2) {
       const seg = snake.segments[i];
       food.push({
@@ -348,6 +424,9 @@
     snake.alive = true;
     snake.boosting = false;
     snake.boostAccum = 0;
+    snake.skin = Math.floor(Math.random() * SKINS.length);
+    const skin = SKINS[snake.skin];
+    snake.color = COLORS.indexOf(skin.colors[0]) >= 0 ? COLORS.indexOf(skin.colors[0]) : 0;
   }
 
   // --- Particles ---
@@ -449,13 +528,11 @@
   function drawSnake(snake, cx, cy) {
     const segs = snake.segments;
     if (segs.length < 2) return;
-    const color = COLORS[snake.color] || COLORS[0];
 
-    // Body dots — each dot is separate with a visible gap
-    // Dot radius = 9, segment spacing = 16, so gap ~= 16 - 18 = visible but < HEAD_RADIUS (14)
     const dotRadius = 9;
+    const headColor = getSegColor(snake, 0);
 
-    ctx.shadowColor = color;
+    // Body dots with per-segment coloring
     ctx.shadowBlur = snake.boosting ? 20 : 10;
 
     for (let i = segs.length - 1; i >= 1; i--) {
@@ -464,17 +541,18 @@
       const sy = seg.y - cy + canvas.height / 2;
       if (sx < -50 || sx > canvas.width + 50 || sy < -50 || sy > canvas.height + 50) continue;
 
-      // Slight size taper toward tail
       const t = 1 - (i / segs.length);
       const r = dotRadius * (0.65 + 0.35 * t);
+      const segColor = getSegColor(snake, i);
 
-      ctx.fillStyle = color;
+      ctx.shadowColor = segColor;
+      ctx.fillStyle = segColor;
       ctx.globalAlpha = 0.9;
       ctx.beginPath();
       ctx.arc(sx, sy, r, 0, Math.PI * 2);
       ctx.fill();
 
-      // Small bright highlight on each dot
+      // Highlight
       ctx.fillStyle = '#fff';
       ctx.globalAlpha = 0.2;
       ctx.beginPath();
@@ -489,9 +567,9 @@
     const hy = head.y - cy + canvas.height / 2;
     const angle = Math.atan2(head.y - segs[1].y, head.x - segs[1].x);
 
-    ctx.shadowColor = color;
+    ctx.shadowColor = headColor;
     ctx.shadowBlur = snake.boosting ? 35 : 20;
-    ctx.fillStyle = color;
+    ctx.fillStyle = headColor;
     ctx.beginPath();
     ctx.arc(hx, hy, HEAD_RADIUS, 0, Math.PI * 2);
     ctx.fill();
@@ -565,7 +643,8 @@
     for (const snake of snakes) {
       if (!snake.alive || snake.segments.length === 0) continue;
       const head = snake.segments[0];
-      minimapCtx.fillStyle = snake.id === myId ? '#fff' : COLORS[snake.color];
+      const c = getSegColor(snake, 0);
+      minimapCtx.fillStyle = snake.id === myId ? '#fff' : c;
       minimapCtx.globalAlpha = snake.id === myId ? 1 : 0.6;
       minimapCtx.beginPath();
       minimapCtx.arc(head.x * scale + ox, head.y * scale + oy, snake.id === myId ? 3 : 2, 0, Math.PI * 2);
@@ -604,44 +683,30 @@
     animTime += dt;
 
     if (running) {
-      // Player input
       const me = snakes.find(s => s.id === myId);
       if (me && me.alive) {
         me.targetAngle = Math.atan2(mouseY - canvas.height / 2, mouseX - canvas.width / 2);
         me.boosting = boosting;
       }
 
-      // Bot AI
       for (const snake of snakes) {
         if (snake.isBot && snake.alive) updateBotAI(snake, dt);
       }
-
-      // Update all snakes
       for (const snake of snakes) {
         if (snake.alive) updateSnake(snake, dt);
       }
-
-      // Collisions
       checkCollisions();
-
-      // Respawn dead bots
       for (const snake of snakes) {
-        if (snake.isBot && !snake.alive) {
-          respawnBot(snake);
-        }
+        if (snake.isBot && !snake.alive) respawnBot(snake);
       }
-
-      // Replenish food
       while (food.length < FOOD_COUNT) food.push(createFood());
 
-      // Camera
       if (me && me.alive) {
         camera.x += (me.segments[0].x - camera.x) * 0.12;
         camera.y += (me.segments[0].y - camera.y) * 0.12;
         myScoreEl.textContent = `Score: ${me.score}`;
       }
 
-      // Leaderboard update ~1Hz
       leaderboardTimer += dt;
       if (leaderboardTimer >= 1) {
         updateLeaderboard();
@@ -651,7 +716,6 @@
 
     updateParticles(dt);
 
-    // Screen shake
     let shakeX = 0, shakeY = 0;
     if (screenShake > 0) {
       shakeX = (Math.random() - 0.5) * screenShake;
@@ -679,7 +743,6 @@
     drawBorder(cx, cy);
     drawFood(cx, cy);
 
-    // Draw snakes (me on top)
     for (const snake of snakes) {
       if (snake.alive && snake.id !== myId) drawSnake(snake, cx, cy);
     }
@@ -688,23 +751,20 @@
 
     drawParticles(cx, cy);
 
-    // In-game cursor indicator
+    // In-game cursor
     if (running) {
-      // Crosshair at mouse position
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
       ctx.lineWidth = 1.5;
       const cr = 12;
       ctx.beginPath();
       ctx.arc(mouseX, mouseY, cr, 0, Math.PI * 2);
       ctx.stroke();
-      // Cross lines
       ctx.beginPath();
       ctx.moveTo(mouseX - cr - 4, mouseY); ctx.lineTo(mouseX - cr + 4, mouseY);
       ctx.moveTo(mouseX + cr - 4, mouseY); ctx.lineTo(mouseX + cr + 4, mouseY);
       ctx.moveTo(mouseX, mouseY - cr - 4); ctx.lineTo(mouseX, mouseY - cr + 4);
       ctx.moveTo(mouseX, mouseY + cr - 4); ctx.lineTo(mouseX, mouseY + cr + 4);
       ctx.stroke();
-      // Center dot
       ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
       ctx.beginPath();
       ctx.arc(mouseX, mouseY, 2, 0, Math.PI * 2);
