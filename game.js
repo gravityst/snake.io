@@ -93,7 +93,7 @@
     startScreen.style.display = 'none';
     deathScreen.style.display = 'none';
     hud.style.display = 'block';
-    document.body.style.cursor = 'none';
+    document.body.style.cursor = 'crosshair';
     running = true;
   }
 
