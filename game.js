@@ -451,42 +451,36 @@
     if (segs.length < 2) return;
     const color = COLORS[snake.color] || COLORS[0];
 
-    ctx.shadowColor = color;
-    ctx.shadowBlur = snake.boosting ? 25 : 15;
+    // Body dots — each dot is separate with a visible gap
+    // Dot radius = 9, segment spacing = 16, so gap ~= 16 - 18 = visible but < HEAD_RADIUS (14)
+    const dotRadius = 9;
 
-    // Body segments
+    ctx.shadowColor = color;
+    ctx.shadowBlur = snake.boosting ? 20 : 10;
+
     for (let i = segs.length - 1; i >= 1; i--) {
       const seg = segs[i];
       const sx = seg.x - cx + canvas.width / 2;
       const sy = seg.y - cy + canvas.height / 2;
       if (sx < -50 || sx > canvas.width + 50 || sy < -50 || sy > canvas.height + 50) continue;
 
+      // Slight size taper toward tail
       const t = 1 - (i / segs.length);
-      const r = BODY_RADIUS * (0.6 + 0.4 * t);
-      const bright = (i % 3 === 0) ? 1.0 : 0.7;
+      const r = dotRadius * (0.65 + 0.35 * t);
 
       ctx.fillStyle = color;
-      ctx.globalAlpha = bright * 0.9;
+      ctx.globalAlpha = 0.9;
       ctx.beginPath();
       ctx.arc(sx, sy, r, 0, Math.PI * 2);
       ctx.fill();
-    }
 
-    // Smooth body line
-    ctx.strokeStyle = color;
-    ctx.lineWidth = BODY_RADIUS * 1.6;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.globalAlpha = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(
-      segs[segs.length - 1].x - cx + canvas.width / 2,
-      segs[segs.length - 1].y - cy + canvas.height / 2
-    );
-    for (let i = segs.length - 2; i >= 0; i--) {
-      ctx.lineTo(segs[i].x - cx + canvas.width / 2, segs[i].y - cy + canvas.height / 2);
+      // Small bright highlight on each dot
+      ctx.fillStyle = '#fff';
+      ctx.globalAlpha = 0.2;
+      ctx.beginPath();
+      ctx.arc(sx - r * 0.25, sy - r * 0.25, r * 0.35, 0, Math.PI * 2);
+      ctx.fill();
     }
-    ctx.stroke();
     ctx.globalAlpha = 1;
 
     // Head
@@ -693,6 +687,30 @@
     if (me && me.alive) drawSnake(me, cx, cy);
 
     drawParticles(cx, cy);
+
+    // In-game cursor indicator
+    if (running) {
+      // Crosshair at mouse position
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = 1.5;
+      const cr = 12;
+      ctx.beginPath();
+      ctx.arc(mouseX, mouseY, cr, 0, Math.PI * 2);
+      ctx.stroke();
+      // Cross lines
+      ctx.beginPath();
+      ctx.moveTo(mouseX - cr - 4, mouseY); ctx.lineTo(mouseX - cr + 4, mouseY);
+      ctx.moveTo(mouseX + cr - 4, mouseY); ctx.lineTo(mouseX + cr + 4, mouseY);
+      ctx.moveTo(mouseX, mouseY - cr - 4); ctx.lineTo(mouseX, mouseY - cr + 4);
+      ctx.moveTo(mouseX, mouseY + cr - 4); ctx.lineTo(mouseX, mouseY + cr + 4);
+      ctx.stroke();
+      // Center dot
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.beginPath();
+      ctx.arc(mouseX, mouseY, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     drawMinimap(cx, cy);
   }
 
