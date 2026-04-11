@@ -53,22 +53,53 @@
   // Each skin has a name and a colors array.
   // Single-color = solid skin, multi-color = dots cycle through the palette.
   const SKINS = [
+    // --- Solid colors ---
     { name: 'Cyan',       colors: ['#0ff'] },
     { name: 'Magenta',    colors: ['#f0f'] },
     { name: 'Lime',       colors: ['#0f0'] },
     { name: 'Gold',       colors: ['#ff0'] },
     { name: 'Coral',      colors: ['#f44'] },
     { name: 'Sky',        colors: ['#08f'] },
+    { name: 'Violet',     colors: ['#a0f'] },
+    { name: 'Mint',       colors: ['#5fc'] },
+    { name: 'Pearl',      colors: ['#fff'] },
+    { name: 'Charcoal',   colors: ['#666'] },
+    { name: 'Crimson',    colors: ['#c12'] },
+    { name: 'Teal',       colors: ['#0a8'] },
+    { name: 'Amber',      colors: ['#fa3'] },
+    // --- Two-tone stripes ---
+    { name: 'Bumblebee',  colors: ['#ff0', '#222'] },
+    { name: 'Zebra',      colors: ['#fff', '#111'] },
+    { name: 'Coralreef',  colors: ['#f44', '#fff'] },
+    { name: 'Wasp',       colors: ['#f80', '#000'] },
+    { name: 'Mintchip',   colors: ['#5fc', '#222'] },
+    { name: 'Bubblegum',  colors: ['#f6c', '#fff'] },
+    { name: 'Twilight',   colors: ['#a0f', '#08f'] },
+    // --- Three+ color gradients ---
     { name: 'Sunset',     colors: ['#f80', '#f44', '#ff0'] },
     { name: 'Ocean',      colors: ['#0ff', '#08f', '#04d'] },
     { name: 'Toxic',      colors: ['#0f0', '#ff0', '#0f0'] },
-    { name: 'Neon Party', colors: ['#f0f', '#0ff', '#ff0', '#0f0'] },
     { name: 'Fire',       colors: ['#f44', '#f80', '#ff0'] },
     { name: 'Galaxy',     colors: ['#a0f', '#08f', '#f0f', '#0ff'] },
     { name: 'Candy',      colors: ['#f0f', '#fff', '#f0f', '#fff'] },
     { name: 'Ice',        colors: ['#aef', '#0ff', '#fff'] },
     { name: 'Lava',       colors: ['#f44', '#f80', '#ff0', '#f44'] },
+    { name: 'Forest',     colors: ['#0a4', '#0f0', '#4f8'] },
+    { name: 'Aurora',     colors: ['#0fa', '#0af', '#a0f', '#0fa'] },
+    { name: 'Cosmic',     colors: ['#a0f', '#f0f', '#fff', '#08f'] },
+    { name: 'Peacock',    colors: ['#0ff', '#0a8', '#08f', '#a0f'] },
+    { name: 'Strawberry', colors: ['#f44', '#fff', '#f0c'] },
+    { name: 'Watermelon', colors: ['#f44', '#0f0', '#fff'] },
+    { name: 'Matrix',     colors: ['#0f0', '#0a4', '#0f0', '#fff'] },
+    { name: 'Cyberpunk',  colors: ['#f0f', '#0ff', '#000', '#f0f', '#0ff'] },
+    { name: 'Dragon',     colors: ['#f44', '#ff0', '#0a4', '#08f'] },
+    { name: 'Plasma',     colors: ['#f0f', '#a0f', '#08f', '#0ff'] },
+    { name: 'Pumpkin',    colors: ['#f80', '#222', '#f80', '#222'] },
+    // --- Long full-spectrum ---
+    { name: 'Neon Party', colors: ['#f0f', '#0ff', '#ff0', '#0f0'] },
     { name: 'Rainbow',    colors: ['#f44', '#f80', '#ff0', '#0f0', '#08f', '#a0f'] },
+    { name: 'Pastel',     colors: ['#fbb', '#fdb', '#ffb', '#bfb', '#bdf', '#fbf'] },
+    { name: 'Spectrum',   colors: ['#f00', '#f80', '#ff0', '#0f0', '#0ff', '#08f', '#a0f', '#f0f'] },
   ];
 
   let selectedSkin = 0;
