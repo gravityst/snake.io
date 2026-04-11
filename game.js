@@ -27,7 +27,7 @@
 
   // --- Config ---
   const MAP_SIZE = 14000;          // massive map
-  const FOOD_COUNT = 3500;         // scaled for larger map
+  const FOOD_COUNT = 2200;         // scaled for larger map
   const SNAKE_SPEED = 200;
   const BOOST_SPEED = 380;
   const SEGMENT_SPACING = 24;      // base distance between body dot centers
@@ -216,8 +216,8 @@
   function createSnake(name, isBot, skinIdx, skill) {
     const id = nextId++;
     const angle = Math.random() * Math.PI * 2;
-    // Bots tend to spawn toward edges (less crowded), player spawns nearer center
-    const pos = isBot ? randomZonedPosition(2.4) : randomZonedPosition(1.4);
+    // Bots spawn weighted toward edges (power<1), player toward center (power>1)
+    const pos = isBot ? randomZonedPosition(0.55) : randomZonedPosition(1.8);
     const x = pos.x, y = pos.y;
     const segments = [];
     for (let i = 0; i < INITIAL_LENGTH; i++) {
@@ -248,31 +248,33 @@
   function createFood() {
     const r = Math.random();
     let radius, value, tier;
-    if (r < 0.55) {
-      // Tiny — most common
-      radius = 4 + Math.random() * 2;
-      value = 1;
-      tier = 0;
-    } else if (r < 0.82) {
-      // Small
+    if (r < 0.35) {
+      radius = 3 + Math.random() * 2;
+      value = 1; tier = 0;
+    } else if (r < 0.58) {
+      radius = 5 + Math.random() * 2;
+      value = 2; tier = 1;
+    } else if (r < 0.75) {
       radius = 7 + Math.random() * 2;
-      value = 2;
-      tier = 1;
+      value = 3; tier = 2;
+    } else if (r < 0.87) {
+      radius = 9 + Math.random() * 2;
+      value = 5; tier = 3;
     } else if (r < 0.94) {
-      // Medium
-      radius = 10 + Math.random() * 3;
-      value = 4 + Math.floor(Math.random() * 3);
-      tier = 2;
+      radius = 11 + Math.random() * 2;
+      value = 8; tier = 4;
+    } else if (r < 0.975) {
+      radius = 13 + Math.random() * 2;
+      value = 12; tier = 5;
     } else if (r < 0.99) {
-      // Large
-      radius = 14 + Math.random() * 3;
-      value = 9 + Math.floor(Math.random() * 5);
-      tier = 3;
+      radius = 15 + Math.random() * 2;
+      value = 18; tier = 6;
+    } else if (r < 0.997) {
+      radius = 18 + Math.random() * 2;
+      value = 26; tier = 7;
     } else {
-      // Glowing rare
-      radius = 17 + Math.random() * 3;
-      value = 18 + Math.floor(Math.random() * 8);
-      tier = 4;
+      radius = 21 + Math.random() * 3;
+      value = 35; tier = 8;
     }
     // Center has dramatically more food density
     const pos = randomZonedPosition(1.5);
@@ -358,12 +360,14 @@
     }
 
     let closest = null;
-    let closestDist = 250;
+    let closestDistSq = 250 * 250;
     for (const f of food) {
       const dx = f.x - head.x;
+      if (dx > 250 || dx < -250) continue;
       const dy = f.y - head.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < closestDist) { closestDist = d; closest = f; }
+      if (dy > 250 || dy < -250) continue;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < closestDistSq) { closestDistSq = d2; closest = f; }
     }
     if (closest) {
       snake.targetAngle = Math.atan2(closest.y - head.y, closest.x - head.x);
@@ -390,12 +394,14 @@
     }
 
     let closestFood = null;
-    let closestDist = 450;
+    let closestFoodSq = 450 * 450;
     for (const f of food) {
       const dx = f.x - head.x;
+      if (dx > 450 || dx < -450) continue;
       const dy = f.y - head.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < closestDist) { closestDist = d; closestFood = f; }
+      if (dy > 450 || dy < -450) continue;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < closestFoodSq) { closestFoodSq = d2; closestFood = f; }
     }
 
     // Threat avoidance
@@ -499,9 +505,10 @@
     let bestRatio = 0;
     for (const f of food) {
       const dx = f.x - head.x;
+      if (dx > 800 || dx < -800) continue;
       const dy = f.y - head.y;
+      if (dy > 800 || dy < -800) continue;
       const d = Math.sqrt(dx * dx + dy * dy);
-      if (d > 800) continue;
       const ratio = (f.value || 1) / (d + 50);
       if (ratio > bestRatio) { bestRatio = ratio; bestFood = f; }
     }
@@ -585,25 +592,20 @@
       }
     }
 
-    // Eat regular food (use thickened head radius)
+    // Eat regular food (use thickened head radius, with fast box reject)
     const headR = HEAD_RADIUS * getThickness(snake);
-    // Magnet pull for big snakes — food within range curves toward you
-    const magnetRange = headR + 30 + Math.min(snake.score / 4, 60);
+    const eatRange = headR + 30; // max f.radius is ~24
     for (let i = food.length - 1; i >= 0; i--) {
       const f = food[i];
-      const dx = head.x - f.x;
-      const dy = head.y - f.y;
-      const distSq = dx * dx + dy * dy;
-      if (distSq < (headR + f.radius) ** 2) {
+      const dx = f.x - head.x;
+      if (dx > eatRange || dx < -eatRange) continue;
+      const dy = f.y - head.y;
+      if (dy > eatRange || dy < -eatRange) continue;
+      const sumR = headR + f.radius;
+      if (dx * dx + dy * dy < sumR * sumR) {
         food.splice(i, 1);
         snake.score += f.value || 1;
         spawnEatParticles(f.x, f.y, f.color);
-      } else if (distSq < magnetRange * magnetRange) {
-        // Light magnet pull toward head
-        const d = Math.sqrt(distSq);
-        const pull = 80 * dt * (1 - d / magnetRange);
-        f.x += (dx / d) * pull;
-        f.y += (dy / d) * pull;
       }
     }
 
@@ -696,8 +698,8 @@
 
   function respawnBot(snake) {
     const angle = Math.random() * Math.PI * 2;
-    // Bots respawn biased toward the edges
-    const pos = randomZonedPosition(2.4);
+    // Bots respawn biased toward the edges (power<1)
+    const pos = randomZonedPosition(0.55);
     snake.segments = [];
     for (let i = 0; i < INITIAL_LENGTH; i++) {
       snake.segments.push({
