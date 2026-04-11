@@ -27,16 +27,16 @@
 
   // --- Config ---
   const MAP_SIZE = 6000;
-  const FOOD_COUNT = 800;
-  const FOOD_RADIUS = 8;
+  const FOOD_COUNT = 700;
   const SNAKE_SPEED = 200;
-  const BOOST_SPEED = 400;
-  const SEGMENT_SPACING = 16;
+  const BOOST_SPEED = 380;
+  const SEGMENT_SPACING = 24;     // distance between body dot centers
+  const DOT_RADIUS = 9;           // radius of each body dot
   const INITIAL_LENGTH = 10;
   const HEAD_RADIUS = 14;
-  const BODY_RADIUS = 12;
-  const BOOST_SHRINK_RATE = 0.5;
+  const BOOST_SHRINK_RATE = 2.5;  // points lost per second while boosting
   const BOT_COUNT = 15;
+  const MEGA_ORB_COUNT = 4;
   const COLORS = ['#0ff', '#f0f', '#0f0', '#ff0', '#f80', '#08f', '#f44', '#8f0'];
   const BOT_NAMES = [
     'Viper', 'Shadow', 'Blaze', 'Neon', 'Ghost', 'Toxic', 'Pixel', 'Glitch',
@@ -124,6 +124,7 @@
   // --- Game state ---
   let snakes = [];
   let food = [];
+  let megaOrbs = [];
   let particles = [];
   let myId = null;
   let nextId = 1;
@@ -183,6 +184,7 @@
   function initGame(playerName) {
     snakes = [];
     food = [];
+    megaOrbs = [];
     particles = [];
     nextId = 1;
 
@@ -196,9 +198,10 @@
     }
 
     // Spawn food
-    for (let i = 0; i < FOOD_COUNT; i++) {
-      food.push(createFood());
-    }
+    for (let i = 0; i < FOOD_COUNT; i++) food.push(createFood());
+
+    // Spawn mega orbs
+    for (let i = 0; i < MEGA_ORB_COUNT; i++) megaOrbs.push(createMegaOrb());
 
     camera.x = player.segments[0].x;
     camera.y = player.segments[0].y;
@@ -236,11 +239,54 @@
   }
 
   function createFood() {
+    const r = Math.random();
+    let radius, value, tier;
+    if (r < 0.55) {
+      // Tiny — most common
+      radius = 4 + Math.random() * 2;
+      value = 1;
+      tier = 0;
+    } else if (r < 0.82) {
+      // Small
+      radius = 7 + Math.random() * 2;
+      value = 2;
+      tier = 1;
+    } else if (r < 0.94) {
+      // Medium
+      radius = 10 + Math.random() * 3;
+      value = 4 + Math.floor(Math.random() * 3);
+      tier = 2;
+    } else if (r < 0.99) {
+      // Large
+      radius = 14 + Math.random() * 3;
+      value = 9 + Math.floor(Math.random() * 5);
+      tier = 3;
+    } else {
+      // Glowing rare
+      radius = 17 + Math.random() * 3;
+      value = 18 + Math.floor(Math.random() * 8);
+      tier = 4;
+    }
     return {
       x: (Math.random() - 0.5) * MAP_SIZE,
       y: (Math.random() - 0.5) * MAP_SIZE,
       color: Math.floor(Math.random() * COLORS.length),
-      radius: FOOD_RADIUS + Math.random() * 4,
+      radius, value, tier,
+    };
+  }
+
+  function createMegaOrb() {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 25 + Math.random() * 25;
+    return {
+      x: (Math.random() - 0.5) * MAP_SIZE * 0.8,
+      y: (Math.random() - 0.5) * MAP_SIZE * 0.8,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      radius: 22 + Math.random() * 8,
+      value: 50 + Math.floor(Math.random() * 31),
+      color: Math.floor(Math.random() * COLORS.length),
+      spin: Math.random() * Math.PI * 2,
     };
   }
 
@@ -302,6 +348,8 @@
   }
 
   // --- Physics ---
+  // segments[0] = head position (continuous)
+  // segments[1..] = body anchors, each exactly SEGMENT_SPACING from the previous
   function updateSnake(snake, dt) {
     let angleDiff = snake.targetAngle - snake.angle;
     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
@@ -313,45 +361,99 @@
       snake.angle += Math.sign(angleDiff) * turnSpeed * dt;
     }
 
+    // Bots can't boost without sufficient score
+    if (snake.boosting && snake.score <= 0) snake.boosting = false;
+
     const speed = snake.boosting ? BOOST_SPEED : SNAKE_SPEED;
     const head = snake.segments[0];
-    const newHead = {
-      x: head.x + Math.cos(snake.angle) * speed * dt,
-      y: head.y + Math.sin(snake.angle) * speed * dt,
-    };
+    head.x += Math.cos(snake.angle) * speed * dt;
+    head.y += Math.sin(snake.angle) * speed * dt;
 
+    // World bounds
     const half = MAP_SIZE / 2;
-    if (newHead.x < -half || newHead.x > half || newHead.y < -half || newHead.y > half) {
+    if (head.x < -half || head.x > half || head.y < -half || head.y > half) {
       killSnake(snake, null);
       return;
     }
 
-    snake.segments.unshift(newHead);
-    const targetLength = INITIAL_LENGTH + snake.score;
+    // Insert new body anchors when head has moved >= SEGMENT_SPACING from segments[1]
+    while (snake.segments.length >= 2) {
+      const dx = head.x - snake.segments[1].x;
+      const dy = head.y - snake.segments[1].y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < SEGMENT_SPACING * SEGMENT_SPACING) break;
+      const dist = Math.sqrt(distSq);
+      const t = SEGMENT_SPACING / dist;
+      snake.segments.splice(1, 0, {
+        x: snake.segments[1].x + dx * t,
+        y: snake.segments[1].y + dy * t,
+      });
+    }
+
+    // Length scales with score
+    const targetLength = INITIAL_LENGTH + Math.floor(snake.score / 2);
     while (snake.segments.length > targetLength) snake.segments.pop();
 
-    if (snake.boosting && snake.segments.length > 5) {
+    // Boost cost — drains score and drops a small food orb
+    if (snake.boosting && snake.score > 0) {
       snake.boostAccum += BOOST_SHRINK_RATE * dt;
       if (snake.boostAccum >= 1) {
         const removed = Math.floor(snake.boostAccum);
         snake.boostAccum -= removed;
-        for (let i = 0; i < removed && snake.segments.length > 5; i++) {
-          const tail = snake.segments.pop();
-          snake.score = Math.max(0, snake.score - 1);
-          food.push({ x: tail.x, y: tail.y, color: snake.color, radius: FOOD_RADIUS });
+        snake.score = Math.max(0, snake.score - removed);
+        // Drop food behind tail
+        if (snake.segments.length > 0) {
+          const tail = snake.segments[snake.segments.length - 1];
+          food.push({
+            x: tail.x + (Math.random() - 0.5) * 14,
+            y: tail.y + (Math.random() - 0.5) * 14,
+            color: snake.color,
+            radius: 5 + Math.random() * 2,
+            value: 1,
+            tier: 0,
+          });
         }
       }
     }
 
+    // Eat regular food
     for (let i = food.length - 1; i >= 0; i--) {
       const f = food[i];
-      const dx = newHead.x - f.x;
-      const dy = newHead.y - f.y;
+      const dx = head.x - f.x;
+      const dy = head.y - f.y;
       if (dx * dx + dy * dy < (HEAD_RADIUS + f.radius) ** 2) {
         food.splice(i, 1);
-        snake.score += 1;
+        snake.score += f.value || 1;
         spawnEatParticles(f.x, f.y, f.color);
       }
+    }
+
+    // Eat mega orbs
+    for (let i = megaOrbs.length - 1; i >= 0; i--) {
+      const m = megaOrbs[i];
+      const dx = head.x - m.x;
+      const dy = head.y - m.y;
+      if (dx * dx + dy * dy < (HEAD_RADIUS + m.radius) ** 2) {
+        megaOrbs.splice(i, 1);
+        snake.score += m.value;
+        spawnDeathParticles(m.x, m.y, m.color);
+        if (snake.id === myId) screenShake = 8;
+        // Respawn a new one elsewhere
+        megaOrbs.push(createMegaOrb());
+      }
+    }
+  }
+
+  function updateMegaOrbs(dt) {
+    const half = MAP_SIZE / 2 - 50;
+    for (const m of megaOrbs) {
+      m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      m.spin += dt * 1.5;
+      if (m.x < -half) { m.x = -half; m.vx = Math.abs(m.vx); }
+      if (m.x > half)  { m.x = half;  m.vx = -Math.abs(m.vx); }
+      if (m.y < -half) { m.y = -half; m.vy = Math.abs(m.vy); }
+      if (m.y > half)  { m.y = half;  m.vy = -Math.abs(m.vy); }
     }
   }
 
@@ -370,7 +472,7 @@
           const seg = b.segments[k];
           const dx = ahead.x - seg.x;
           const dy = ahead.y - seg.y;
-          const dist = HEAD_RADIUS + BODY_RADIUS;
+          const dist = HEAD_RADIUS + DOT_RADIUS;
           if (dx * dx + dy * dy < dist * dist) {
             killSnake(a, b);
             b.score += Math.floor(a.segments.length / 2);
@@ -386,13 +488,16 @@
     if (!snake.alive) return;
     snake.alive = false;
 
+    // Drop food along the body — bigger snake = bigger drops
     for (let i = 0; i < snake.segments.length; i += 2) {
       const seg = snake.segments[i];
       food.push({
         x: seg.x + (Math.random() - 0.5) * 20,
         y: seg.y + (Math.random() - 0.5) * 20,
         color: snake.color,
-        radius: FOOD_RADIUS + 3,
+        radius: 8 + Math.random() * 4,
+        value: 3 + Math.floor(Math.random() * 3),
+        tier: 2,
       });
     }
 
@@ -500,16 +605,29 @@
     for (const f of food) {
       const sx = f.x - cx + canvas.width / 2;
       const sy = f.y - cy + canvas.height / 2;
-      if (sx < -20 || sx > canvas.width + 20 || sy < -20 || sy > canvas.height + 20) continue;
+      if (sx < -30 || sx > canvas.width + 30 || sy < -30 || sy > canvas.height + 30) continue;
 
-      const pulse = 0.8 + 0.2 * Math.sin(animTime * 3 + f.x * 0.01 + f.y * 0.01);
+      const tier = f.tier || 0;
+      const pulseAmt = 0.15 + tier * 0.04;
+      const pulse = (1 - pulseAmt) + pulseAmt * Math.sin(animTime * (3 + tier) + f.x * 0.01 + f.y * 0.01);
       const r = f.radius * pulse;
       const color = COLORS[f.color] || COLORS[0];
 
+      // Outer halo for larger food
+      if (tier >= 3) {
+        const haloGrad = ctx.createRadialGradient(sx, sy, r, sx, sy, r * 2.5);
+        haloGrad.addColorStop(0, color + '55');
+        haloGrad.addColorStop(1, 'transparent');
+        ctx.fillStyle = haloGrad;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r * 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       ctx.shadowColor = color;
-      ctx.shadowBlur = 12;
+      ctx.shadowBlur = 6 + tier * 5;
       ctx.fillStyle = color;
-      ctx.globalAlpha = 0.9;
+      ctx.globalAlpha = 0.92;
       ctx.beginPath();
       ctx.arc(sx, sy, r, 0, Math.PI * 2);
       ctx.fill();
@@ -525,15 +643,75 @@
     }
   }
 
+  function drawMegaOrbs(cx, cy) {
+    for (const m of megaOrbs) {
+      const sx = m.x - cx + canvas.width / 2;
+      const sy = m.y - cy + canvas.height / 2;
+      if (sx < -100 || sx > canvas.width + 100 || sy < -100 || sy > canvas.height + 100) continue;
+
+      const pulse = 0.92 + 0.08 * Math.sin(animTime * 4);
+      const r = m.radius * pulse;
+      const color = COLORS[m.color] || COLORS[0];
+
+      // Big outer halo
+      const halo = ctx.createRadialGradient(sx, sy, r * 0.5, sx, sy, r * 3.5);
+      halo.addColorStop(0, color + 'aa');
+      halo.addColorStop(0.4, color + '33');
+      halo.addColorStop(1, 'transparent');
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r * 3.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Rotating sparkle ring
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.7;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 8]);
+      ctx.lineDashOffset = -m.spin * 10;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r * 1.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+
+      // Main orb
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 35;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Bright core
+      ctx.fillStyle = '#fff';
+      ctx.globalAlpha = 0.75;
+      ctx.beginPath();
+      ctx.arc(sx - r * 0.25, sy - r * 0.25, r * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+
+      // Value label
+      ctx.font = 'bold 14px "Segoe UI", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = 6;
+      ctx.fillText(`+${m.value}`, sx, sy + r + 18);
+      ctx.shadowBlur = 0;
+    }
+  }
+
   function drawSnake(snake, cx, cy) {
     const segs = snake.segments;
     if (segs.length < 2) return;
 
-    const dotRadius = 9;
     const headColor = getSegColor(snake, 0);
 
     // Body dots with per-segment coloring
-    ctx.shadowBlur = snake.boosting ? 20 : 10;
+    ctx.shadowBlur = snake.boosting ? 18 : 10;
 
     for (let i = segs.length - 1; i >= 1; i--) {
       const seg = segs[i];
@@ -541,22 +719,23 @@
       const sy = seg.y - cy + canvas.height / 2;
       if (sx < -50 || sx > canvas.width + 50 || sy < -50 || sy > canvas.height + 50) continue;
 
-      const t = 1 - (i / segs.length);
-      const r = dotRadius * (0.65 + 0.35 * t);
+      // Slight taper toward tail
+      const tailT = i / segs.length;
+      const r = DOT_RADIUS * (1 - tailT * 0.35);
       const segColor = getSegColor(snake, i);
 
       ctx.shadowColor = segColor;
       ctx.fillStyle = segColor;
-      ctx.globalAlpha = 0.9;
+      ctx.globalAlpha = 0.95;
       ctx.beginPath();
       ctx.arc(sx, sy, r, 0, Math.PI * 2);
       ctx.fill();
 
       // Highlight
       ctx.fillStyle = '#fff';
-      ctx.globalAlpha = 0.2;
+      ctx.globalAlpha = 0.22;
       ctx.beginPath();
-      ctx.arc(sx - r * 0.25, sy - r * 0.25, r * 0.35, 0, Math.PI * 2);
+      ctx.arc(sx - r * 0.3, sy - r * 0.3, r * 0.35, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
@@ -640,6 +819,17 @@
     const scale = w / MAP_SIZE;
     const ox = w / 2, oy = h / 2;
 
+    // Mega orbs as bright pulsing dots
+    const megaPulse = 0.7 + 0.3 * Math.sin(animTime * 4);
+    for (const m of megaOrbs) {
+      minimapCtx.fillStyle = COLORS[m.color];
+      minimapCtx.globalAlpha = megaPulse;
+      minimapCtx.beginPath();
+      minimapCtx.arc(m.x * scale + ox, m.y * scale + oy, 3, 0, Math.PI * 2);
+      minimapCtx.fill();
+    }
+    minimapCtx.globalAlpha = 1;
+
     for (const snake of snakes) {
       if (!snake.alive || snake.segments.length === 0) continue;
       const head = snake.segments[0];
@@ -692,6 +882,7 @@
       for (const snake of snakes) {
         if (snake.isBot && snake.alive) updateBotAI(snake, dt);
       }
+      updateMegaOrbs(dt);
       for (const snake of snakes) {
         if (snake.alive) updateSnake(snake, dt);
       }
@@ -742,6 +933,7 @@
     drawGrid(cx, cy);
     drawBorder(cx, cy);
     drawFood(cx, cy);
+    drawMegaOrbs(cx, cy);
 
     for (const snake of snakes) {
       if (snake.alive && snake.id !== myId) drawSnake(snake, cx, cy);
