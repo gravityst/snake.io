@@ -26,17 +26,22 @@
   const minimapCtx = minimapCanvas.getContext('2d');
 
   // --- Config ---
-  const MAP_SIZE = 6000;
-  const FOOD_COUNT = 700;
+  const MAP_SIZE = 14000;          // massive map
+  const FOOD_COUNT = 3500;         // scaled for larger map
   const SNAKE_SPEED = 200;
   const BOOST_SPEED = 380;
-  const SEGMENT_SPACING = 24;     // distance between body dot centers
-  const DOT_RADIUS = 9;           // radius of each body dot
+  const SEGMENT_SPACING = 24;      // base distance between body dot centers
+  const DOT_RADIUS = 9;            // base radius of each body dot
   const INITIAL_LENGTH = 10;
-  const HEAD_RADIUS = 14;
-  const BOOST_SHRINK_RATE = 2.5;  // points lost per second while boosting
-  const BOT_COUNT = 15;
-  const MEGA_ORB_COUNT = 4;
+  const HEAD_RADIUS = 14;          // base head radius
+  const BOOST_SHRINK_RATE = 2.5;   // points lost per second while boosting
+  const BOT_COUNT = 30;            // more bots for larger map
+  const MEGA_ORB_COUNT = 8;
+  const MAX_ADVANCED_BOTS = 2;     // hard cap on rare advanced AI
+  // Bot skill tiers
+  const SKILL_BEGINNER = 0;
+  const SKILL_AMATEUR = 1;
+  const SKILL_ADVANCED = 2;
   const COLORS = ['#0ff', '#f0f', '#0f0', '#ff0', '#f80', '#08f', '#f44', '#8f0'];
   const BOT_NAMES = [
     'Viper', 'Shadow', 'Blaze', 'Neon', 'Ghost', 'Toxic', 'Pixel', 'Glitch',
@@ -189,12 +194,13 @@
     nextId = 1;
 
     // Spawn player with selected skin
-    const player = createSnake(playerName, false, selectedSkin);
+    const player = createSnake(playerName, false, selectedSkin, SKILL_BEGINNER);
     myId = player.id;
 
-    // Spawn bots with random skins
+    // Spawn bots with random skins and skill levels
     for (let i = 0; i < BOT_COUNT; i++) {
-      createSnake(BOT_NAMES[i % BOT_NAMES.length], true, Math.floor(Math.random() * SKINS.length));
+      const skill = randomBotSkill();
+      createSnake(BOT_NAMES[i % BOT_NAMES.length], true, Math.floor(Math.random() * SKINS.length), skill);
     }
 
     // Spawn food
@@ -207,11 +213,12 @@
     camera.y = player.segments[0].y;
   }
 
-  function createSnake(name, isBot, skinIdx) {
+  function createSnake(name, isBot, skinIdx, skill) {
     const id = nextId++;
     const angle = Math.random() * Math.PI * 2;
-    const x = (Math.random() - 0.5) * MAP_SIZE * 0.6;
-    const y = (Math.random() - 0.5) * MAP_SIZE * 0.6;
+    // Bots tend to spawn toward edges (less crowded), player spawns nearer center
+    const pos = isBot ? randomZonedPosition(2.4) : randomZonedPosition(1.4);
+    const x = pos.x, y = pos.y;
     const segments = [];
     for (let i = 0; i < INITIAL_LENGTH; i++) {
       segments.push({
@@ -226,10 +233,10 @@
       boosting: false,
       score: 0,
       skin: skinIdx,
-      // Keep a single color index for food drops / minimap (first color of skin)
       color: COLORS.indexOf(skin.colors[0]) >= 0 ? COLORS.indexOf(skin.colors[0]) : 0,
       alive: true,
       isBot,
+      skill: skill ?? SKILL_BEGINNER,
       boostAccum: 0,
       botTimer: 0,
       botWanderAngle: angle,
@@ -267,9 +274,10 @@
       value = 18 + Math.floor(Math.random() * 8);
       tier = 4;
     }
+    // Center has dramatically more food density
+    const pos = randomZonedPosition(1.5);
     return {
-      x: (Math.random() - 0.5) * MAP_SIZE,
-      y: (Math.random() - 0.5) * MAP_SIZE,
+      x: pos.x, y: pos.y,
       color: Math.floor(Math.random() * COLORS.length),
       radius, value, tier,
     };
@@ -278,9 +286,10 @@
   function createMegaOrb() {
     const angle = Math.random() * Math.PI * 2;
     const speed = 25 + Math.random() * 25;
+    // Mega orbs concentrated more toward center too
+    const pos = randomZonedPosition(1.3);
     return {
-      x: (Math.random() - 0.5) * MAP_SIZE * 0.8,
-      y: (Math.random() - 0.5) * MAP_SIZE * 0.8,
+      x: pos.x, y: pos.y,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
       radius: 22 + Math.random() * 8,
@@ -296,14 +305,83 @@
     return skin.colors[segIndex % skin.colors.length];
   }
 
+  // --- Snake thickness scales with score (1.0 -> ~1.7) ---
+  function getThickness(snake) {
+    return 1 + Math.min(snake.score / 250, 0.7);
+  }
+
+  // --- Zoned random position: weighted toward map center ---
+  // power < 1 = strongly biased toward center, power > 1 = biased toward edges
+  function randomZonedPosition(power = 1.6) {
+    const r = Math.pow(Math.random(), power) * (MAP_SIZE / 2 - 100);
+    const a = Math.random() * Math.PI * 2;
+    return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+  }
+
+  // --- Pick a bot skill, respecting advanced cap ---
+  function randomBotSkill() {
+    const advancedCount = snakes.filter(s => s.isBot && s.alive && s.skill === SKILL_ADVANCED).length;
+    const r = Math.random();
+    if (r < 0.05 && advancedCount < MAX_ADVANCED_BOTS) return SKILL_ADVANCED;
+    if (r < 0.30) return SKILL_AMATEUR;
+    return SKILL_BEGINNER;
+  }
+
   // --- Bot AI ---
   function updateBotAI(snake, dt) {
+    if (snake.skill === SKILL_ADVANCED) updateAdvancedAI(snake, dt);
+    else if (snake.skill === SKILL_AMATEUR) updateAmateurAI(snake, dt);
+    else updateBeginnerAI(snake, dt);
+  }
+
+  // BEGINNER — slow reactions, small awareness, no threat avoidance
+  function updateBeginnerAI(snake, dt) {
     snake.botTimer -= dt;
     if (snake.botTimer > 0) return;
-    snake.botTimer = 0.3 + Math.random() * 0.5;
+    snake.botTimer = 0.7 + Math.random() * 0.8;
 
     const head = snake.segments[0];
-    const half = MAP_SIZE / 2 - 200;
+    const half = MAP_SIZE / 2 - 250;
+
+    if (Math.abs(head.x) > half || Math.abs(head.y) > half) {
+      snake.targetAngle = Math.atan2(-head.y, -head.x);
+      snake.boosting = false;
+      return;
+    }
+
+    // Look for food only nearby, sometimes wander randomly
+    if (Math.random() < 0.25) {
+      snake.botWanderAngle += (Math.random() - 0.5) * 2.5;
+      snake.targetAngle = snake.botWanderAngle;
+      snake.boosting = false;
+      return;
+    }
+
+    let closest = null;
+    let closestDist = 250;
+    for (const f of food) {
+      const dx = f.x - head.x;
+      const dy = f.y - head.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < closestDist) { closestDist = d; closest = f; }
+    }
+    if (closest) {
+      snake.targetAngle = Math.atan2(closest.y - head.y, closest.x - head.x);
+    } else {
+      snake.botWanderAngle += (Math.random() - 0.5) * 2;
+      snake.targetAngle = snake.botWanderAngle;
+    }
+    snake.boosting = false;
+  }
+
+  // AMATEUR — moderate reactions, basic threat avoidance
+  function updateAmateurAI(snake, dt) {
+    snake.botTimer -= dt;
+    if (snake.botTimer > 0) return;
+    snake.botTimer = 0.3 + Math.random() * 0.4;
+
+    const head = snake.segments[0];
+    const half = MAP_SIZE / 2 - 250;
 
     if (Math.abs(head.x) > half || Math.abs(head.y) > half) {
       snake.targetAngle = Math.atan2(-head.y, -head.x);
@@ -312,7 +390,7 @@
     }
 
     let closestFood = null;
-    let closestDist = 400;
+    let closestDist = 450;
     for (const f of food) {
       const dx = f.x - head.x;
       const dy = f.y - head.y;
@@ -320,31 +398,122 @@
       if (d < closestDist) { closestDist = d; closestFood = f; }
     }
 
-    let threatened = false;
+    // Threat avoidance
     for (const other of snakes) {
       if (other.id === snake.id || !other.alive) continue;
       const ohead = other.segments[0];
       const dx = ohead.x - head.x;
       const dy = ohead.y - head.y;
       const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < 150) {
+      if (d < 180) {
         snake.targetAngle = Math.atan2(-dy, -dx) + (Math.random() - 0.5) * 0.5;
-        snake.boosting = d < 80;
-        threatened = true;
-        break;
+        snake.boosting = d < 90;
+        return;
       }
     }
 
-    if (!threatened) {
-      if (closestFood) {
-        snake.targetAngle = Math.atan2(closestFood.y - head.y, closestFood.x - head.x);
-        snake.boosting = false;
-      } else {
-        snake.botWanderAngle += (Math.random() - 0.5) * 1.5;
-        snake.targetAngle = snake.botWanderAngle;
-        snake.boosting = false;
+    if (closestFood) {
+      snake.targetAngle = Math.atan2(closestFood.y - head.y, closestFood.x - head.x);
+      snake.boosting = false;
+    } else {
+      snake.botWanderAngle += (Math.random() - 0.5) * 1.2;
+      snake.targetAngle = snake.botWanderAngle;
+      snake.boosting = false;
+    }
+  }
+
+  // ADVANCED — fast reactions, hunts smaller snakes, predicts movement, grabs mega orbs
+  function updateAdvancedAI(snake, dt) {
+    snake.botTimer -= dt;
+    if (snake.botTimer > 0) return;
+    snake.botTimer = 0.1;
+
+    const head = snake.segments[0];
+    const half = MAP_SIZE / 2 - 250;
+
+    // Wall avoidance
+    if (Math.abs(head.x) > half || Math.abs(head.y) > half) {
+      snake.targetAngle = Math.atan2(-head.y, -head.x);
+      snake.boosting = false;
+      return;
+    }
+
+    // Threat detection (any snake equal or larger nearby)
+    for (const other of snakes) {
+      if (other.id === snake.id || !other.alive) continue;
+      const ohead = other.segments[0];
+      const dx = ohead.x - head.x;
+      const dy = ohead.y - head.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 220 && other.score >= snake.score * 0.85) {
+        // Flee perpendicular to incoming threat
+        const perp = Math.atan2(-dy, -dx);
+        snake.targetAngle = perp + (Math.random() < 0.5 ? -0.3 : 0.3);
+        snake.boosting = d < 130 && snake.score > 30;
+        return;
       }
     }
+
+    // Hunt for mega orbs first (prioritize predicted position)
+    let bestMega = null;
+    let bestMegaDist = 1500;
+    for (const m of megaOrbs) {
+      const dx = m.x - head.x;
+      const dy = m.y - head.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < bestMegaDist) { bestMegaDist = d; bestMega = m; }
+    }
+    if (bestMega) {
+      const t = bestMegaDist / SNAKE_SPEED;
+      const tx = bestMega.x + bestMega.vx * t;
+      const ty = bestMega.y + bestMega.vy * t;
+      snake.targetAngle = Math.atan2(ty - head.y, tx - head.x);
+      snake.boosting = bestMegaDist > 500 && snake.score > 20;
+      return;
+    }
+
+    // Hunt smaller snakes — try to cut off their path
+    let bestPrey = null;
+    let bestPreyDist = 700;
+    for (const other of snakes) {
+      if (other.id === snake.id || !other.alive) continue;
+      if (other.score >= snake.score * 0.7) continue;
+      const ohead = other.segments[0];
+      const dx = ohead.x - head.x;
+      const dy = ohead.y - head.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < bestPreyDist) { bestPreyDist = d; bestPrey = other; }
+    }
+    if (bestPrey) {
+      // Predict where prey will be and aim there
+      const lookahead = 0.8 + bestPreyDist / 400;
+      const targetX = bestPrey.segments[0].x + Math.cos(bestPrey.angle) * SNAKE_SPEED * lookahead;
+      const targetY = bestPrey.segments[0].y + Math.sin(bestPrey.angle) * SNAKE_SPEED * lookahead;
+      snake.targetAngle = Math.atan2(targetY - head.y, targetX - head.x);
+      snake.boosting = bestPreyDist > 250 && snake.score > 40;
+      return;
+    }
+
+    // Look for high-value food (value-to-distance ratio)
+    let bestFood = null;
+    let bestRatio = 0;
+    for (const f of food) {
+      const dx = f.x - head.x;
+      const dy = f.y - head.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 800) continue;
+      const ratio = (f.value || 1) / (d + 50);
+      if (ratio > bestRatio) { bestRatio = ratio; bestFood = f; }
+    }
+    if (bestFood) {
+      snake.targetAngle = Math.atan2(bestFood.y - head.y, bestFood.x - head.x);
+      snake.boosting = false;
+      return;
+    }
+
+    snake.botWanderAngle += (Math.random() - 0.5) * 0.5;
+    snake.targetAngle = snake.botWanderAngle;
+    snake.boosting = false;
   }
 
   // --- Physics ---
@@ -416,15 +585,25 @@
       }
     }
 
-    // Eat regular food
+    // Eat regular food (use thickened head radius)
+    const headR = HEAD_RADIUS * getThickness(snake);
+    // Magnet pull for big snakes — food within range curves toward you
+    const magnetRange = headR + 30 + Math.min(snake.score / 4, 60);
     for (let i = food.length - 1; i >= 0; i--) {
       const f = food[i];
       const dx = head.x - f.x;
       const dy = head.y - f.y;
-      if (dx * dx + dy * dy < (HEAD_RADIUS + f.radius) ** 2) {
+      const distSq = dx * dx + dy * dy;
+      if (distSq < (headR + f.radius) ** 2) {
         food.splice(i, 1);
         snake.score += f.value || 1;
         spawnEatParticles(f.x, f.y, f.color);
+      } else if (distSq < magnetRange * magnetRange) {
+        // Light magnet pull toward head
+        const d = Math.sqrt(distSq);
+        const pull = 80 * dt * (1 - d / magnetRange);
+        f.x += (dx / d) * pull;
+        f.y += (dy / d) * pull;
       }
     }
 
@@ -433,7 +612,7 @@
       const m = megaOrbs[i];
       const dx = head.x - m.x;
       const dy = head.y - m.y;
-      if (dx * dx + dy * dy < (HEAD_RADIUS + m.radius) ** 2) {
+      if (dx * dx + dy * dy < (headR + m.radius) ** 2) {
         megaOrbs.splice(i, 1);
         snake.score += m.value;
         spawnDeathParticles(m.x, m.y, m.color);
@@ -462,20 +641,23 @@
       const a = snakes[i];
       if (!a.alive) continue;
       const ahead = a.segments[0];
+      const aHeadR = HEAD_RADIUS * getThickness(a);
 
       for (let j = 0; j < snakes.length; j++) {
         if (i === j) continue;
         const b = snakes[j];
         if (!b.alive) continue;
+        const bDotR = DOT_RADIUS * getThickness(b);
+        const dist = aHeadR + bDotR;
+        const distSq = dist * dist;
 
         for (let k = 1; k < b.segments.length; k++) {
           const seg = b.segments[k];
           const dx = ahead.x - seg.x;
           const dy = ahead.y - seg.y;
-          const dist = HEAD_RADIUS + DOT_RADIUS;
-          if (dx * dx + dy * dy < dist * dist) {
+          if (dx * dx + dy * dy < distSq) {
             killSnake(a, b);
-            b.score += Math.floor(a.segments.length / 2);
+            b.score += Math.floor(a.segments.length / 2 + a.score / 4);
             break;
           }
         }
@@ -514,13 +696,13 @@
 
   function respawnBot(snake) {
     const angle = Math.random() * Math.PI * 2;
-    const x = (Math.random() - 0.5) * MAP_SIZE * 0.6;
-    const y = (Math.random() - 0.5) * MAP_SIZE * 0.6;
+    // Bots respawn biased toward the edges
+    const pos = randomZonedPosition(2.4);
     snake.segments = [];
     for (let i = 0; i < INITIAL_LENGTH; i++) {
       snake.segments.push({
-        x: x - Math.cos(angle) * i * SEGMENT_SPACING,
-        y: y - Math.sin(angle) * i * SEGMENT_SPACING,
+        x: pos.x - Math.cos(angle) * i * SEGMENT_SPACING,
+        y: pos.y - Math.sin(angle) * i * SEGMENT_SPACING,
       });
     }
     snake.angle = angle;
@@ -532,6 +714,8 @@
     snake.skin = Math.floor(Math.random() * SKINS.length);
     const skin = SKINS[snake.skin];
     snake.color = COLORS.indexOf(skin.colors[0]) >= 0 ? COLORS.indexOf(skin.colors[0]) : 0;
+    // Reroll skill level (advanced count is checked dynamically)
+    snake.skill = randomBotSkill();
   }
 
   // --- Particles ---
@@ -709,6 +893,9 @@
     if (segs.length < 2) return;
 
     const headColor = getSegColor(snake, 0);
+    const thickness = getThickness(snake);
+    const dotR = DOT_RADIUS * thickness;
+    const headR = HEAD_RADIUS * thickness;
 
     // Body dots with per-segment coloring
     ctx.shadowBlur = snake.boosting ? 18 : 10;
@@ -719,9 +906,8 @@
       const sy = seg.y - cy + canvas.height / 2;
       if (sx < -50 || sx > canvas.width + 50 || sy < -50 || sy > canvas.height + 50) continue;
 
-      // Slight taper toward tail
       const tailT = i / segs.length;
-      const r = DOT_RADIUS * (1 - tailT * 0.35);
+      const r = dotR * (1 - tailT * 0.35);
       const segColor = getSegColor(snake, i);
 
       ctx.shadowColor = segColor;
@@ -731,7 +917,6 @@
       ctx.arc(sx, sy, r, 0, Math.PI * 2);
       ctx.fill();
 
-      // Highlight
       ctx.fillStyle = '#fff';
       ctx.globalAlpha = 0.22;
       ctx.beginPath();
@@ -750,17 +935,17 @@
     ctx.shadowBlur = snake.boosting ? 35 : 20;
     ctx.fillStyle = headColor;
     ctx.beginPath();
-    ctx.arc(hx, hy, HEAD_RADIUS, 0, Math.PI * 2);
+    ctx.arc(hx, hy, headR, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
 
     // Eyes
-    const eyeOff = HEAD_RADIUS * 0.5;
-    const eyeR = HEAD_RADIUS * 0.28;
+    const eyeOff = headR * 0.5;
+    const eyeR = headR * 0.28;
     const perp = angle + Math.PI / 2;
     for (const side of [-1, 1]) {
-      const ex = hx + Math.cos(angle) * HEAD_RADIUS * 0.3 + Math.cos(perp) * eyeOff * side;
-      const ey = hy + Math.sin(angle) * HEAD_RADIUS * 0.3 + Math.sin(perp) * eyeOff * side;
+      const ex = hx + Math.cos(angle) * headR * 0.3 + Math.cos(perp) * eyeOff * side;
+      const ey = hy + Math.sin(angle) * headR * 0.3 + Math.sin(perp) * eyeOff * side;
       ctx.fillStyle = '#fff';
       ctx.beginPath(); ctx.arc(ex, ey, eyeR, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#111';
@@ -781,12 +966,12 @@
     ctx.fillStyle = 'rgba(255,255,255,0.8)';
     ctx.shadowColor = 'rgba(0,0,0,0.8)';
     ctx.shadowBlur = 4;
-    ctx.fillText(snake.name, hx, hy - HEAD_RADIUS - 18);
+    ctx.fillText(snake.name, hx, hy - headR - 18);
     ctx.shadowBlur = 0;
     if (snake.score > 0) {
       ctx.font = '11px "Segoe UI", sans-serif';
       ctx.fillStyle = 'rgba(255,255,255,0.4)';
-      ctx.fillText(snake.score, hx, hy - HEAD_RADIUS - 5);
+      ctx.fillText(snake.score, hx, hy - headR - 5);
     }
   }
 
