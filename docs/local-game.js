@@ -7,8 +7,8 @@ class LocalGame {
   constructor(playerName, skinIdx) {
     this.MAP_SIZE = 14000;
     this.FOOD_COUNT = 1800;
-    this.SNAKE_SPEED = 200;
-    this.BOOST_SPEED = 380;
+    this.SNAKE_SPEED = 280;
+    this.BOOST_SPEED = 500;
     this.SEGMENT_SPACING = 24;
     this.DOT_RADIUS = 9;
     this.INITIAL_LENGTH = 10;

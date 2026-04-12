@@ -548,9 +548,10 @@
   let spectateTarget = null;
   let lastKillerPos = null;
 
-  // --- Ping display ---
+  // --- Ping display (smoothed) ---
   let lastPingSent = 0;
   let ping = 0;
+  let smoothPing = 0; // exponential moving average
 
   // --- Kill counter ---
   let myKills = 0;
@@ -894,12 +895,16 @@
     snakes=newSnakes; food=newFood; megaOrbs=newMega;
     // Cache snake names for kill feed (names persist after death)
     for (const s of newSnakes) snakeNameCache.set(s.id, s.name);
-    // Ping tracking
-    if (lastPingSent > 0) { ping = performance.now() - lastPingSent; }
+    // Ping tracking (smoothed EMA)
+    if (lastPingSent > 0) {
+      const rawPing = performance.now() - lastPingSent;
+      smoothPing = smoothPing === 0 ? rawPing : smoothPing * 0.85 + rawPing * 0.15;
+      ping = smoothPing;
+    }
     const me=snakes.find(s=>s.id===myId);
     if (me&&me.segments.length>0) {
-      camera.x+=(me.segments[0].x-camera.x)*0.15;
-      camera.y+=(me.segments[0].y-camera.y)*0.15;
+      camera.x+=(me.segments[0].x-camera.x)*0.2;
+      camera.y+=(me.segments[0].y-camera.y)*0.2;
       // Score popup on increase
       if (me.score > prevScore && prevScore > 0) {
         const diff = me.score - prevScore;
@@ -942,7 +947,7 @@
     // Death zoom / spectate (client-side camera pan only, no server needed)
     if (lastKillerPos) {
       spectateTarget = { x: lastKillerPos.x, y: lastKillerPos.y };
-      spectateTimer = 3;
+      spectateTimer = 0.8; // quick death cam, not 3s of frozen world
       // running stays true so camera panning works in frame loop
     } else {
       deathScreen.style.display='flex';
@@ -1360,7 +1365,12 @@
     // Ping display (multiplayer)
     if (gameMode === 'multiplayer' && running) {
       const pingEl = document.getElementById('ping');
-      if (pingEl) pingEl.textContent = Math.round(ping) + 'ms';
+      if (pingEl) {
+        const p = Math.round(ping);
+        const color = p < 50 ? '#0f0' : p < 100 ? '#ff0' : '#f44';
+        pingEl.textContent = p + 'ms';
+        pingEl.style.color = color;
+      }
     }
     // Update HUD score with animated counter + kills
     if (running && gameMode === 'multiplayer') {
