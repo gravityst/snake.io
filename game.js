@@ -27,7 +27,7 @@
 
   // --- Config ---
   const MAP_SIZE = 9000;           // large but playable
-  const FOOD_COUNT = 1500;
+  const FOOD_COUNT = 1000;
   const SNAKE_SPEED = 200;
   const BOOST_SPEED = 380;
   const SEGMENT_SPACING = 24;
@@ -35,8 +35,8 @@
   const INITIAL_LENGTH = 10;
   const HEAD_RADIUS = 14;
   const BOOST_SHRINK_RATE = 2.5;
-  const BOT_COUNT = 40;
-  const MEGA_ORB_COUNT = 6;
+  const BOT_COUNT = 25;
+  const MEGA_ORB_COUNT = 12;
   const BASE_ZOOM = 0.72;          // camera zoom (smaller = sees more)
   const MAX_ADVANCED_BOTS = 2;     // hard cap on rare advanced AI
   // Bot skill tiers
@@ -823,57 +823,42 @@
     const half = MAP_SIZE / 2;
     const sx = -half - cx + canvas.width / 2;
     const sy = -half - cy + canvas.height / 2;
-    ctx.strokeStyle = 'rgba(255, 0, 0, 0.4)';
+    ctx.strokeStyle = 'rgba(255, 60, 60, 0.5)';
     ctx.lineWidth = 4;
-    ctx.shadowColor = '#f00';
-    ctx.shadowBlur = 20;
     ctx.strokeRect(sx, sy, MAP_SIZE, MAP_SIZE);
-    ctx.shadowBlur = 0;
   }
 
   function drawFood(cx, cy) {
     const halfW = canvas.width / (2 * zoom) + 40;
     const halfH = canvas.height / (2 * zoom) + 40;
     const midX = canvas.width / 2, midY = canvas.height / 2;
+    ctx.shadowBlur = 0;
     for (const f of food) {
       const sx = f.x - cx + midX;
       const sy = f.y - cy + midY;
       if (sx < midX - halfW || sx > midX + halfW || sy < midY - halfH || sy > midY + halfH) continue;
 
       const tier = f.tier || 0;
-      const pulseAmt = 0.15 + tier * 0.04;
-      const pulse = (1 - pulseAmt) + pulseAmt * Math.sin(animTime * (3 + tier) + f.x * 0.01 + f.y * 0.01);
+      const pulse = 0.9 + 0.1 * Math.sin(animTime * 3 + f.x * 0.01);
       const r = f.radius * pulse;
       const color = COLORS[f.color] || COLORS[0];
 
-      // Outer halo for larger food
-      if (tier >= 3) {
-        const haloGrad = ctx.createRadialGradient(sx, sy, r, sx, sy, r * 2.5);
-        haloGrad.addColorStop(0, hexFull(color) + '55');
-        haloGrad.addColorStop(1, 'transparent');
-        ctx.fillStyle = haloGrad;
+      // Soft halo for big food (cheap semi-transparent circle, no gradient)
+      if (tier >= 4) {
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.12;
         ctx.beginPath();
-        ctx.arc(sx, sy, r * 2.5, 0, Math.PI * 2);
+        ctx.arc(sx, sy, r * 2, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 6 + tier * 5;
       ctx.fillStyle = color;
-      ctx.globalAlpha = 0.92;
+      ctx.globalAlpha = 0.9;
       ctx.beginPath();
       ctx.arc(sx, sy, r, 0, Math.PI * 2);
       ctx.fill();
-
-      ctx.globalAlpha = 0.6;
-      ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      ctx.arc(sx - r * 0.2, sy - r * 0.2, r * 0.35, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.globalAlpha = 1;
-      ctx.shadowBlur = 0;
     }
+    ctx.globalAlpha = 1;
   }
 
   function drawMegaOrbs(cx, cy) {
@@ -911,13 +896,14 @@
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;
 
-      // Main orb
+      // Main orb (only element that gets shadow — just 12 total)
       ctx.shadowColor = color;
-      ctx.shadowBlur = 35;
+      ctx.shadowBlur = 25;
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(sx, sy, r, 0, Math.PI * 2);
       ctx.fill();
+      ctx.shadowBlur = 0;
 
       // Bright core
       ctx.fillStyle = '#fff';
@@ -927,16 +913,12 @@
       ctx.fill();
 
       ctx.globalAlpha = 1;
-      ctx.shadowBlur = 0;
 
       // Value label
       ctx.font = 'bold 14px "Segoe UI", sans-serif';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#fff';
-      ctx.shadowColor = 'rgba(0,0,0,0.8)';
-      ctx.shadowBlur = 6;
       ctx.fillText(`+${m.value}`, sx, sy + r + 18);
-      ctx.shadowBlur = 0;
     }
   }
 
@@ -953,8 +935,8 @@
     const halfH = canvas.height / (2 * zoom) + 80;
     const midX = canvas.width / 2, midY = canvas.height / 2;
 
-    // Body dots with per-segment coloring
-    ctx.shadowBlur = snake.boosting ? 18 : 10;
+    // Body dots — NO shadowBlur (the #1 perf killer)
+    ctx.shadowBlur = 0;
 
     for (let i = segs.length - 1; i >= 1; i--) {
       const seg = segs[i];
@@ -966,29 +948,24 @@
       const r = dotR * (1 - tailT * 0.35);
       const segColor = getSegColor(snake, i);
 
-      ctx.shadowColor = segColor;
       ctx.fillStyle = segColor;
       ctx.globalAlpha = 0.95;
       ctx.beginPath();
       ctx.arc(sx, sy, r, 0, Math.PI * 2);
       ctx.fill();
-
-      ctx.fillStyle = '#fff';
-      ctx.globalAlpha = 0.22;
-      ctx.beginPath();
-      ctx.arc(sx - r * 0.3, sy - r * 0.3, r * 0.35, 0, Math.PI * 2);
-      ctx.fill();
     }
     ctx.globalAlpha = 1;
 
-    // Head
+    // Head — shadow only on player's own head (1 blur per frame, fine)
     const head = segs[0];
     const hx = head.x - cx + canvas.width / 2;
     const hy = head.y - cy + canvas.height / 2;
     const angle = Math.atan2(head.y - segs[1].y, head.x - segs[1].x);
 
-    ctx.shadowColor = headColor;
-    ctx.shadowBlur = snake.boosting ? 35 : 20;
+    if (snake.id === myId) {
+      ctx.shadowColor = headColor;
+      ctx.shadowBlur = snake.boosting ? 30 : 15;
+    }
     ctx.fillStyle = headColor;
     ctx.beginPath();
     ctx.arc(hx, hy, headR, 0, Math.PI * 2);
@@ -1020,10 +997,7 @@
     ctx.font = 'bold 13px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    ctx.shadowColor = 'rgba(0,0,0,0.8)';
-    ctx.shadowBlur = 4;
     ctx.fillText(snake.name, hx, hy - headR - 18);
-    ctx.shadowBlur = 0;
     if (snake.score > 0) {
       ctx.font = '11px "Segoe UI", sans-serif';
       ctx.fillStyle = 'rgba(255,255,255,0.4)';
@@ -1040,8 +1014,6 @@
       const sy = p.y - cy + midY;
       if (sx < midX - halfW || sx > midX + halfW || sy < midY - halfH || sy > midY + halfH) continue;
       ctx.globalAlpha = p.life;
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = 8;
       ctx.fillStyle = p.color;
       ctx.beginPath();
       ctx.arc(sx, sy, p.size * p.life, 0, Math.PI * 2);
