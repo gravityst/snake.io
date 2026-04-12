@@ -180,6 +180,9 @@
   // --- Kill counter ---
   let myKills = 0;
 
+  // --- Top snake tracking ---
+  let topSnakeId = null;
+
   // --- Mobile virtual joystick ---
   const isTouchDevice = ('ontouchstart' in window);
   let joystickActive = false;
@@ -311,6 +314,8 @@
   // --- PLAY VS AI ---
   function startLocalGame() {
     gameMode = 'local';
+    myKills = 0; displayScore = 0; prevScore = 0; scorePopups = []; killFeed = [];
+    freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
     const name = nameInput.value.trim() || 'Player';
     localGame = new LocalGame(name, selectedSkin);
     myId = localGame.playerId;
@@ -390,6 +395,9 @@
 
   function startMultiplayerGame(roomId, teamId) {
     gameMode = 'multiplayer';
+    myKills = 0; displayScore = 0; prevScore = 0; scorePopups = []; killFeed = [];
+    freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
+    ping = 0; lastPingSent = 0;
     currentRoomId = roomId;
     selectedTeamId = teamId ?? -1;
     const name = nameInput.value.trim() || 'Player';
@@ -847,12 +855,42 @@
     const dt = Math.min((now-lastFrame)/1000, 0.05);
     lastFrame = now; animTime += dt;
 
+    // Freeze frame on kill — skip game updates but still render
+    let gameDt = dt;
+    if (freezeTimer > 0) { freezeTimer -= dt; gameDt = 0; }
+
+    // Spectate timer countdown
+    if (spectateTimer > 0) {
+      spectateTimer -= dt;
+      if (spectateTarget) {
+        camera.x += (spectateTarget.x - camera.x) * 0.03;
+        camera.y += (spectateTarget.y - camera.y) * 0.03;
+      }
+      if (spectateTimer <= 0) {
+        spectateTimer = 0; spectateTarget = null;
+        deathScreen.style.display='flex';
+        document.body.style.cursor='default';
+        running=false;
+        disconnect();
+      }
+    }
+
+    // Score counter animation
+    displayScore += (lastScore - displayScore) * 0.15;
+
+    // Determine #1 snake
+    topSnakeId = null;
+    let topScore = -1;
+    for (const s of snakes) { if (s.alive && s.score > topScore) { topScore = s.score; topSnakeId = s.id; } }
+
     if (running) {
       if (gameMode==='local' && localGame) {
         // Local mode: tick game, read state, feed input
-        const angle = Math.atan2(mouseY-canvas.height/2, mouseX-canvas.width/2);
+        const angle = (isTouchDevice && joystickActive)
+          ? joystickAngle
+          : Math.atan2(mouseY-canvas.height/2, mouseX-canvas.width/2);
         localGame.setPlayerInput(angle, boosting);
-        localGame.tick(dt);
+        localGame.tick(gameDt);
         snakes = localGame.snakes.filter(s => s.alive);
         food = localGame.food;
         megaOrbs = localGame.megaOrbs;
@@ -860,7 +898,15 @@
         if (me && me.alive) {
           camera.x += (me.segments[0].x - camera.x) * 0.12;
           camera.y += (me.segments[0].y - camera.y) * 0.12;
-          myScoreEl.textContent = `Score: ${me.score}`;
+          // Score popup on increase (local)
+          if (me.score > prevScore && prevScore > 0) {
+            const diff = me.score - prevScore;
+            const head = me.segments[0];
+            const skin = SKINS[me.skin] || SKINS[0];
+            scorePopups.push({ x: head.x, y: head.y - 30, text: '+' + diff, color: skin.colors[0], life: 1.0 });
+          }
+          prevScore = me.score;
+          myScoreEl.textContent = `Score: ${Math.round(displayScore)} | Kills: ${myKills}`;
           lastScore = me.score;
         }
         // Update leaderboard
@@ -874,7 +920,7 @@
         }
         playerCountEl.textContent=`Players: ${localGame.snakes.filter(s=>s.alive).length}`;
       } else if (gameMode==='multiplayer') {
-        sendTimer += dt;
+        sendTimer += gameDt;
         if (sendTimer >= 0.033) { sendDirection(); sendTimer = 0; }
       }
     }
@@ -895,11 +941,12 @@
 
     ctx.save();
     ctx.translate(canvas.width/2,canvas.height/2);ctx.scale(zoom,zoom);ctx.translate(-canvas.width/2,-canvas.height/2);
-    drawGrid(cx,cy); drawBorder(cx,cy); drawFood(cx,cy); drawMegaOrbs(cx,cy);
+    drawStars(cx,cy); drawGrid(cx,cy); drawBorder(cx,cy); drawFood(cx,cy); drawMegaOrbs(cx,cy);
     const me=snakes.find(s=>s.id===myId);
     for(const snake of snakes){if(snake.alive&&snake.id!==myId)drawSnake(snake,cx,cy);}
     if(me&&me.alive) drawSnake(me,cx,cy);
     drawParticles(cx,cy);
+    drawScorePopups(cx, cy, dt);
     ctx.restore();
 
     if(running){
@@ -912,6 +959,26 @@
       ctx.moveTo(mouseX,mouseY+cr-4);ctx.lineTo(mouseX,mouseY+cr+4);
       ctx.stroke();
       ctx.fillStyle='rgba(255,255,255,0.8)';ctx.beginPath();ctx.arc(mouseX,mouseY,2,0,Math.PI*2);ctx.fill();
+      drawJoystick();
+    }
+    // Screen-space overlays (outside zoom transform)
+    drawKillFeed(dt);
+    drawSpeedLines(dt);
+    // Spectate text
+    if (spectateTimer > 0) {
+      ctx.font = 'bold 20px "Segoe UI",sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.fillText('Spectating...', canvas.width / 2, canvas.height - 60);
+    }
+    // Ping display (multiplayer)
+    if (gameMode === 'multiplayer' && running) {
+      const pingEl = document.getElementById('ping');
+      if (pingEl) pingEl.textContent = Math.round(ping) + 'ms';
+    }
+    // Update HUD score with animated counter + kills
+    if (running && gameMode === 'multiplayer') {
+      myScoreEl.textContent = `Score: ${Math.round(displayScore)} | Kills: ${myKills}`;
     }
     drawMinimap(cx,cy);
   }
