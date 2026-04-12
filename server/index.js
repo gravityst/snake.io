@@ -27,7 +27,17 @@ app.post('/api/rooms', (req, res) => {
   const room = roomManager.createCustomRoom(
     name, mode || 'solo', teamSize || 2, creatorName || ''
   );
-  res.json({ id: room.id, name: room.name });
+  res.json({ id: room.id, name: room.name, code: room.code });
+});
+
+// Join by room code
+app.get('/api/rooms/code/:code', (req, res) => {
+  for (const [id, room] of roomManager.rooms) {
+    if (room.code === req.params.code.toUpperCase()) {
+      return res.json({ id, name: room.name, mode: room.mode });
+    }
+  }
+  res.status(404).json({ error: 'Room not found' });
 });
 
 const PORT = process.env.PORT || 3000;

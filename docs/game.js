@@ -137,8 +137,63 @@
   let zoom = BASE_ZOOM, lastScore = 0, sendTimer = 0;
   let roomPollInterval = null;
 
+  // --- Score popups ---
+  let scorePopups = [];
+  let prevScore = 0;
+
+  // --- Kill feed ---
+  let killFeed = [];
+
+  // --- Parallax starfield ---
+  const stars = [];
+  for (let i = 0; i < 200; i++) {
+    stars.push({
+      x: (Math.random() - 0.5) * MAP_SIZE * 1.5,
+      y: (Math.random() - 0.5) * MAP_SIZE * 1.5,
+      size: 0.5 + Math.random() * 1.5,
+      brightness: 0.2 + Math.random() * 0.5
+    });
+  }
+
+  // --- Score counter animation ---
+  let displayScore = 0;
+
+  // --- Boost speed lines ---
+  const speedLines = [];
+  for (let i = 0; i < 8; i++) {
+    speedLines.push({ angle: (Math.PI * 2 / 8) * i, len: 60 + Math.random() * 120 });
+  }
+  let speedLineRotation = 0;
+
+  // --- Freeze frame on kill ---
+  let freezeTimer = 0;
+
+  // --- Death zoom / spectate ---
+  let spectateTimer = 0;
+  let spectateTarget = null;
+  let lastKillerPos = null;
+
+  // --- Ping display ---
+  let lastPingSent = 0;
+  let ping = 0;
+
+  // --- Kill counter ---
+  let myKills = 0;
+
+  // --- Mobile virtual joystick ---
+  const isTouchDevice = ('ontouchstart' in window);
+  let joystickActive = false;
+  let joystickTouchId = null;
+  let joystickAngle = 0;
+  const joystickCenter = { x: 100, y: 0 }; // y set on resize
+  const joystickRadius = 60;
+  let joystickDelta = { x: 0, y: 0 };
+
   // --- Resize ---
-  function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+  function resize() {
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    joystickCenter.y = canvas.height - 100;
+  }
   window.addEventListener('resize', resize); resize();
 
   // --- Input ---
@@ -147,9 +202,49 @@
   canvas.addEventListener('mouseup', () => setBoosting(false));
   window.addEventListener('keydown', (e) => { if (e.code==='Space') { e.preventDefault(); setBoosting(true); } });
   window.addEventListener('keyup', (e) => { if (e.code==='Space') setBoosting(false); });
-  canvas.addEventListener('touchmove', (e) => { e.preventDefault(); mouseX=e.touches[0].clientX; mouseY=e.touches[0].clientY; }, {passive:false});
-  canvas.addEventListener('touchstart', (e) => { e.preventDefault(); mouseX=e.touches[0].clientX; mouseY=e.touches[0].clientY; if(e.touches.length>=2) setBoosting(true); }, {passive:false});
-  canvas.addEventListener('touchend', (e) => { if(e.touches.length<2) setBoosting(false); });
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (isTouchDevice && joystickActive) {
+      for (let i = 0; i < e.touches.length; i++) {
+        const t = e.touches[i];
+        if (t.identifier === joystickTouchId) {
+          joystickDelta.x = t.clientX - joystickCenter.x;
+          joystickDelta.y = t.clientY - joystickCenter.y;
+          const dist = Math.sqrt(joystickDelta.x * joystickDelta.x + joystickDelta.y * joystickDelta.y);
+          if (dist > 5) joystickAngle = Math.atan2(joystickDelta.y, joystickDelta.x);
+          if (dist > joystickRadius) { joystickDelta.x *= joystickRadius/dist; joystickDelta.y *= joystickRadius/dist; }
+          continue;
+        }
+      }
+    } else {
+      mouseX=e.touches[0].clientX; mouseY=e.touches[0].clientY;
+    }
+  }, {passive:false});
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (isTouchDevice) {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        const dx = t.clientX - joystickCenter.x, dy = t.clientY - joystickCenter.y;
+        if (Math.sqrt(dx*dx+dy*dy) < joystickRadius * 2 && !joystickActive) {
+          joystickActive = true;
+          joystickTouchId = t.identifier;
+          joystickDelta.x = dx; joystickDelta.y = dy;
+          continue;
+        }
+      }
+    }
+    mouseX=e.touches[0].clientX; mouseY=e.touches[0].clientY;
+    if(e.touches.length>=2) setBoosting(true);
+  }, {passive:false});
+  canvas.addEventListener('touchend', (e) => {
+    if(e.touches.length<2) setBoosting(false);
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === joystickTouchId) {
+        joystickActive = false; joystickTouchId = null; joystickDelta.x = 0; joystickDelta.y = 0;
+      }
+    }
+  });
 
   function setBoosting(val) {
     boosting = val;
@@ -348,10 +443,25 @@
       else if (type===0x01) parseState(buf);
       else if (type===0x03) { if(buf.getUint16(1,true)===myId) onDeath(); }
       else if (type===0x04) {
+        const killerId=buf.getUint16(1,true);
         const killedId=buf.getUint16(3,true);
         const killed=snakes.find(s=>s.id===killedId);
+        const killer=snakes.find(s=>s.id===killerId);
         if(killed&&killed.segments.length>0) spawnDeathParticles(killed.segments[0].x,killed.segments[0].y,killed.skin);
         if(killedId===myId) screenShake=15;
+        // Kill feed
+        const killerName = killer ? killer.name : '???';
+        const killedName = killed ? killed.name : '???';
+        killFeed.push({ text: killerName + ' killed ' + killedName, timer: 4 });
+        // Store killer position for death cam
+        if (killer && killer.segments.length > 0) {
+          lastKillerPos = { x: killer.segments[0].x, y: killer.segments[0].y };
+        }
+        // Freeze frame + kill counter for player kills
+        if (killerId === myId) {
+          freezeTimer = 0.06;
+          myKills++;
+        }
       }
       else if (type===0x05) parseLeaderboard(buf);
     };
@@ -394,10 +504,20 @@
       off+=7;
     }
     snakes=newSnakes; food=newFood; megaOrbs=newMega;
+    // Ping tracking
+    if (lastPingSent > 0) { ping = performance.now() - lastPingSent; }
     const me=snakes.find(s=>s.id===myId);
     if (me&&me.segments.length>0) {
       camera.x+=(me.segments[0].x-camera.x)*0.15;
       camera.y+=(me.segments[0].y-camera.y)*0.15;
+      // Score popup on increase
+      if (me.score > prevScore && prevScore > 0) {
+        const diff = me.score - prevScore;
+        const head = me.segments[0];
+        const skin = SKINS[me.skin] || SKINS[0];
+        scorePopups.push({ x: head.x, y: head.y - 30, text: '+' + diff, color: skin.colors[0], life: 1.0 });
+      }
+      prevScore = me.score;
       myScoreEl.textContent=`Score: ${me.score}`;
       lastScore=me.score;
     }
@@ -425,15 +545,27 @@
 
   function onDeath() {
     finalScoreEl.textContent=lastScore;
-    deathScreen.style.display='flex';
-    document.body.style.cursor='default';
-    screenShake=15; myId=null; running=false;
-    disconnect(); // cleanly close so no phantom reconnects
+    screenShake=15;
+    // Death zoom / spectate
+    if (lastKillerPos) {
+      spectateTarget = { x: lastKillerPos.x, y: lastKillerPos.y };
+      spectateTimer = 3;
+      // Keep running so the camera pans, but mark player dead
+      myId = null;
+    } else {
+      deathScreen.style.display='flex';
+      document.body.style.cursor='default';
+      myId=null; running=false;
+      disconnect();
+    }
   }
 
   function sendDirection() {
     if (!ws||ws.readyState!==WebSocket.OPEN||myId===null) return;
-    const angle=Math.atan2(mouseY-canvas.height/2,mouseX-canvas.width/2);
+    lastPingSent = performance.now();
+    const angle = (isTouchDevice && joystickActive)
+      ? joystickAngle
+      : Math.atan2(mouseY-canvas.height/2,mouseX-canvas.width/2);
     const buf=new ArrayBuffer(5); const v=new DataView(buf);
     v.setUint8(0,0x01); v.setFloat32(1,angle,true); ws.send(buf);
   }
@@ -525,12 +657,16 @@
     if(snake.id===myId){ctx.shadowColor=headColor;ctx.shadowBlur=snake.boosting?30:15;}
     ctx.fillStyle=headColor;ctx.beginPath();ctx.arc(hx,hy,headR,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
     const eyeOff=headR*0.5,eyeR=headR*0.28,perp=angle+Math.PI/2;
+    // Eye tracking: player's snake looks toward mouse cursor
+    const pupilAngle = (snake.id===myId) ? Math.atan2(mouseY-hy,mouseX-hx) : angle;
     for(const side of[-1,1]){
       const ex=hx+Math.cos(angle)*headR*0.3+Math.cos(perp)*eyeOff*side;
       const ey=hy+Math.sin(angle)*headR*0.3+Math.sin(perp)*eyeOff*side;
       ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ex,ey,eyeR,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle='#111';ctx.beginPath();ctx.arc(ex+Math.cos(angle)*eyeR*0.3,ey+Math.sin(angle)*eyeR*0.3,eyeR*0.55,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#111';ctx.beginPath();ctx.arc(ex+Math.cos(pupilAngle)*eyeR*0.3,ey+Math.sin(pupilAngle)*eyeR*0.3,eyeR*0.55,0,Math.PI*2);ctx.fill();
     }
+    // Crown on #1 snake
+    if(snake.id===topSnakeId) drawCrown(hx, hy, headR);
     if(snake.boosting&&segs.length>2&&Math.random()<0.4){const tail=segs[segs.length-1];spawnEatParticles(tail.x,tail.y,snake.skin);}
     // Name + AI badge
     ctx.font='bold 13px "Segoe UI",sans-serif';ctx.textAlign='center';
@@ -559,6 +695,126 @@
       ctx.globalAlpha=p.life;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(sx,sy,p.size*p.life,0,Math.PI*2);ctx.fill();
     }
     ctx.globalAlpha=1;ctx.shadowBlur=0;
+  }
+
+  // --- Parallax starfield ---
+  function drawStars(cx, cy) {
+    const midX = canvas.width / 2, midY = canvas.height / 2;
+    for (const star of stars) {
+      const sx = star.x * 0.3 - cx * 0.3 + midX;
+      const sy = star.y * 0.3 - cy * 0.3 + midY;
+      if (sx < -10 || sx > canvas.width + 10 || sy < -10 || sy > canvas.height + 10) continue;
+      ctx.globalAlpha = star.brightness * 0.4;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(sx, sy, star.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // --- Score popups (called inside zoom transform) ---
+  function drawScorePopups(cx, cy, dt) {
+    const midX = canvas.width / 2, midY = canvas.height / 2;
+    for (let i = scorePopups.length - 1; i >= 0; i--) {
+      const p = scorePopups[i];
+      p.life -= dt * 1.5;
+      p.y -= 40 * dt;
+      if (p.life <= 0) { scorePopups.splice(i, 1); continue; }
+      const sx = p.x - cx + midX, sy = p.y - cy + midY;
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.font = 'bold 16px "Segoe UI",sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(p.text, sx, sy);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // --- Kill feed (screen coords, called outside zoom transform) ---
+  function drawKillFeed(dt) {
+    for (let i = killFeed.length - 1; i >= 0; i--) {
+      killFeed[i].timer -= dt;
+      if (killFeed[i].timer <= 0) killFeed.splice(i, 1);
+    }
+    const feedX = canvas.width / 2;
+    let feedY = 50;
+    ctx.font = 'bold 13px "Segoe UI",sans-serif';
+    ctx.textAlign = 'center';
+    for (let i = 0; i < killFeed.length && i < 5; i++) {
+      const entry = killFeed[killFeed.length - 1 - i];
+      if (!entry) continue;
+      const alpha = Math.min(entry.timer, 1);
+      const slideIn = Math.min(1, (4 - entry.timer) * 4); // slides in over 0.25s
+      const tw = ctx.measureText(entry.text).width;
+      ctx.globalAlpha = alpha * 0.5;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(feedX - tw / 2 - 12, feedY - 12, tw + 24, 22);
+      ctx.globalAlpha = alpha * slideIn;
+      ctx.fillStyle = '#fff';
+      ctx.fillText(entry.text, feedX, feedY + 3);
+      feedY += 28;
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // --- Crown on #1 ---
+  function drawCrown(hx, hy, headR) {
+    const crownW = headR * 1.2, crownH = headR * 0.8;
+    const cy = hy - headR - crownH - 22;
+    ctx.fillStyle = '#ffd700';
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(hx - crownW, cy + crownH);
+    ctx.lineTo(hx - crownW, cy + crownH * 0.3);
+    ctx.lineTo(hx - crownW * 0.5, cy + crownH * 0.6);
+    ctx.lineTo(hx, cy);
+    ctx.lineTo(hx + crownW * 0.5, cy + crownH * 0.6);
+    ctx.lineTo(hx + crownW, cy + crownH * 0.3);
+    ctx.lineTo(hx + crownW, cy + crownH);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // --- Boost speed lines (screen coords, called outside zoom transform) ---
+  function drawSpeedLines(dt) {
+    if (!boosting || !running) return;
+    speedLineRotation += dt * 0.3;
+    const cx = canvas.width / 2, cy = canvas.height / 2;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1;
+    for (const line of speedLines) {
+      const a = line.angle + speedLineRotation;
+      const innerR = Math.min(canvas.width, canvas.height) * 0.35;
+      const outerR = innerR + line.len;
+      ctx.globalAlpha = 0.12 + Math.random() * 0.08;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * innerR, cy + Math.sin(a) * innerR);
+      ctx.lineTo(cx + Math.cos(a) * outerR, cy + Math.sin(a) * outerR);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // --- Mobile virtual joystick ---
+  function drawJoystick() {
+    if (!isTouchDevice || !running) return;
+    const cx = joystickCenter.x, cy = joystickCenter.y;
+    // Outer ring
+    ctx.globalAlpha = 0.2;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, joystickRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    // Inner knob
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx + joystickDelta.x, cy + joystickDelta.y, 20, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
   }
 
   function drawMinimap(cx,cy) {

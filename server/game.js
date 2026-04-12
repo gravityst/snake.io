@@ -74,6 +74,7 @@ class Room {
     this.spawnBots(MAX_BOTS);
 
     this.lastTick = Date.now();
+    this.tickCount = 0;
     this.tickInterval = setInterval(() => this.tick(), TICK_MS);
     this.broadcastInterval = setInterval(() => {
       this.broadcastState();
@@ -157,6 +158,8 @@ class Room {
       skill:skill??SKILL_BEGINNER,
       boostAccum:0,botTimer:0,botWanderAngle:angle,
       teamId:-1, // -1 = no team (solo mode)
+      invincible:2, // 2 seconds of spawn invincibility
+      kills:0,
     };
     this.snakes.set(id,snake);
     return snake;
@@ -272,6 +275,14 @@ class Room {
     if(!snake||!snake.alive) return;
     if(type===0x01&&buf.length>=5) snake.targetAngle=buf.readFloatLE(1);
     else if(type===0x02&&buf.length>=2) snake.boosting=buf[1]===1;
+    else if(type===0x07&&buf.length>=2){
+      // Chat emote relay: client sends [0x07][emoteId u8]
+      // Broadcast [0x07][snakeId u16][emoteId u8] to all clients
+      const emoteId=buf[1];
+      const out=Buffer.alloc(4);
+      out[0]=0x07;out.writeUInt16LE(playerId,1);out[3]=emoteId;
+      this.broadcast(out);
+    }
   }
 
   // --- Kill ---
@@ -290,6 +301,8 @@ class Room {
         color:snake.color,radius:r,value:v,tier:t});
     }
     if(killerId!==null){
+      const killer=this.snakes.get(killerId);
+      if(killer) killer.kills++;
       const buf=Buffer.alloc(5);buf[0]=0x04;buf.writeUInt16LE(killerId,1);buf.writeUInt16LE(id,3);
       this.broadcast(buf);
     }
@@ -327,6 +340,7 @@ class Room {
     const now=Date.now();
     const dt=Math.min((now-this.lastTick)/1000,0.05);
     this.lastTick=now;
+    this.tickCount++;
     this.updateMegaOrbs(dt);
     for(const [,s] of this.snakes){if(s.isBot&&s.alive) this._botAI(s,dt);}
     for(const [,s] of this.snakes){if(s.alive) this._updateSnake(s,dt);}
@@ -335,6 +349,7 @@ class Room {
   }
 
   _updateSnake(snake,dt) {
+    if(snake.invincible>0) snake.invincible=Math.max(0,snake.invincible-dt);
     let ad=snake.targetAngle-snake.angle;
     while(ad>Math.PI)ad-=Math.PI*2;while(ad<-Math.PI)ad+=Math.PI*2;
     if(Math.abs(ad)<9*dt)snake.angle=snake.targetAngle;else snake.angle+=Math.sign(ad)*9*dt;
@@ -384,10 +399,12 @@ class Room {
     const arr=Array.from(this.snakes.values()).filter(s=>s.alive);
     for(let i=0;i<arr.length;i++){
       const a=arr[i];if(!a.alive)continue;
+      if(a.invincible>0) continue; // spawn invincibility
       const ahead=a.segments[0],aHeadR=HEAD_RADIUS*this._thickness(a);
       for(let j=0;j<arr.length;j++){
         if(i===j)continue;
         const b=arr[j];if(!b.alive)continue;
+        if(b.invincible>0) continue; // skip invincible snakes as obstacle
         // TEAM MODE: teammates can't collide
         if(this.mode==='team'&&a.teamId>=0&&a.teamId===b.teamId) continue;
         const bDotR=DOT_RADIUS*this._thickness(b);
@@ -401,6 +418,33 @@ class Room {
           }
         }
         if(!a.alive)break;
+      }
+    }
+    // Self-coil trap: ray-casting detection (every 10th tick for perf)
+    if(this.tickCount%10===0){
+      for(let i=0;i<arr.length;i++){
+        const a=arr[i];if(!a.alive||a.segments.length<20) continue;
+        for(let j=0;j<arr.length;j++){
+          if(i===j)continue;
+          const b=arr[j];if(!b.alive)continue;
+          if(b.invincible>0) continue;
+          if(this.mode==='team'&&a.teamId>=0&&a.teamId===b.teamId) continue;
+          // Ray cast: horizontal ray from b's head, count crossings with a's body segments
+          const bHead=b.segments[0];
+          let crossings=0;
+          const segs=a.segments;
+          for(let k=0;k<segs.length-1;k++){
+            const s1=segs[k],s2=segs[k+1];
+            if((s1.y>bHead.y)!==(s2.y>bHead.y)){
+              const xInt=s1.x+(bHead.y-s1.y)/(s2.y-s1.y)*(s2.x-s1.x);
+              if(bHead.x<xInt) crossings++;
+            }
+          }
+          if(crossings%2===1){
+            this.killSnake(b.id,a.id);
+            a.score+=Math.floor(b.segments.length/2+b.score/4);
+          }
+        }
       }
     }
   }
@@ -462,10 +506,10 @@ class Room {
       for(const m of this.megaOrbs){if(Math.abs(m.x-cx)<viewRange&&Math.abs(m.y-cy)<viewRange)visMega.push(m);}
 
       // [0x01][snakeCount u16]
-      // per snake: [id u16][skin u8][boosting u8][isBot u8][teamId i8][score u16][nameLen u8][name][segCount u16][segs]
+      // per snake: [id u16][skin u8][boosting u8][isBot u8][teamId i8][invincible u8][score u16][nameLen u8][name][segCount u16][segs]
       let totalSegs=0,totalNameBytes=0;
       for(const s of visSnakes){totalSegs+=s.segments.length;totalNameBytes+=Buffer.byteLength(s.name,'utf8');}
-      const bufSize=1+2+visSnakes.length*(2+1+1+1+1+2+1+2)+totalNameBytes+totalSegs*4+2+visFood.length*7+2+visMega.length*7;
+      const bufSize=1+2+visSnakes.length*(2+1+1+1+1+1+2+1+2)+totalNameBytes+totalSegs*4+2+visFood.length*7+2+visMega.length*7;
       const buf=Buffer.alloc(bufSize);
       let off=0;
       buf[off++]=0x01;buf.writeUInt16LE(visSnakes.length,off);off+=2;
@@ -473,6 +517,7 @@ class Room {
         buf.writeUInt16LE(snake.id,off);off+=2;
         buf[off++]=snake.skin;buf[off++]=snake.boosting?1:0;buf[off++]=snake.isBot?1:0;
         buf.writeInt8(snake.teamId,off);off+=1;
+        buf[off++]=snake.invincible>0?1:0;
         buf.writeUInt16LE(Math.min(snake.score,65535),off);off+=2;
         const nb=Buffer.from(snake.name,'utf8');buf[off++]=nb.length;nb.copy(buf,off);off+=nb.length;
         buf.writeUInt16LE(snake.segments.length,off);off+=2;
@@ -497,17 +542,22 @@ class Room {
           const s = this.snakes.get(sid);
           if (s && s.alive) totalScore += s.score;
         }
-        entries.push({ id: 60000 + teamId, score: totalScore, name: team.name, isBot: false, teamId });
+        let totalKills = 0;
+        for (const sid of team.memberIds) {
+          const s = this.snakes.get(sid);
+          if (s && s.alive) totalKills += s.kills;
+        }
+        entries.push({ id: 60000 + teamId, score: totalScore, name: team.name, isBot: false, teamId, kills: totalKills });
       }
       entries.sort((a,b) => b.score - a.score);
     } else {
       entries = Array.from(this.snakes.values())
         .filter(s=>s.alive).sort((a,b)=>b.score-a.score).slice(0,10)
-        .map(s => ({ id: s.id, score: s.score, name: s.name, isBot: s.isBot, teamId: s.teamId }));
+        .map(s => ({ id: s.id, score: s.score, name: s.name, isBot: s.isBot, teamId: s.teamId, kills: s.kills }));
     }
 
     let size=2;
-    for(const e of entries) size+=7+Buffer.byteLength(e.name,'utf8');
+    for(const e of entries) size+=8+Buffer.byteLength(e.name,'utf8'); // +1 for kills byte
     const buf=Buffer.alloc(size);
     let off=0;
     buf[off++]=0x05;buf[off++]=entries.length;
@@ -515,6 +565,7 @@ class Room {
       buf.writeUInt16LE(e.id,off);off+=2;
       buf.writeUInt16LE(Math.min(e.score,65535),off);off+=2;
       buf[off++]=e.isBot?1:0;
+      buf[off++]=Math.min(e.kills||0,255);
       buf.writeInt8(e.teamId,off);off+=1;
       const nb=Buffer.from(e.name,'utf8');buf[off++]=nb.length;nb.copy(buf,off);off+=nb.length;
     }
@@ -555,7 +606,13 @@ class RoomManager {
   createCustomRoom(name, mode, teamSize, creatorName) {
     const id = `custom-${this.nextCustomId++}`;
     const opts = { mode, teamSize: teamSize || 2, maxTeams: Math.floor(30/(teamSize||2)), isCustom: true, creatorName };
-    return this.createRoom(id, name, opts);
+    const room = this.createRoom(id, name, opts);
+    // Generate random 6-char alphanumeric room code
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+    room.code = code;
+    return room;
   }
 
   onConnection(ws, req) {
@@ -580,6 +637,7 @@ class RoomManager {
         maxPlayers: MAX_PLAYERS_PER_ROOM,
         isCustom: room.isCustom,
         creatorName: room.creatorName,
+        code: room.code || null,
         teams: room.mode==='team' ? Array.from(room.teams.entries()).map(([tid,t])=>({
           id:tid, name:t.name, color:t.color,
           members: t.memberIds.size,
