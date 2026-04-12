@@ -351,7 +351,7 @@
   let previewAnim = 0;
 
   function updateSkinPreview() {
-    if (skinScreen.style.display !== 'flex') return;
+    if (skinScreen.style.display === 'none' || !skinScreen.style.display) return;
     previewAnim += 0.03;
     const w = skinPreview.width, h = skinPreview.height;
     spCtx.clearRect(0, 0, w, h);
@@ -408,7 +408,7 @@
     requestAnimationFrame(updateSkinPreview);
   }
 
-  skinsBtn.addEventListener('click', () => { startScreen.style.display='none'; skinScreen.style.display='flex'; updateSkinPreview(); });
+  skinsBtn.addEventListener('click', () => { startScreen.style.display='none'; skinScreen.style.display='block'; updateSkinPreview(); });
   skinBackBtn.addEventListener('click', () => { skinScreen.style.display='none'; startScreen.style.display='flex'; });
 
   // --- Helpers ---
