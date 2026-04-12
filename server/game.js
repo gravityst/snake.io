@@ -454,13 +454,31 @@ class Room {
   _botAI(s,dt){if(s.skill===SKILL_ADVANCED)this._advAI(s,dt);else if(s.skill===SKILL_AMATEUR)this._amtAI(s,dt);else this._begAI(s,dt);}
 
   _begAI(s,dt){
-    s.botTimer-=dt;if(s.botTimer>0)return;s.botTimer=0.7+Math.random()*0.8;
+    s.botTimer-=dt;if(s.botTimer>0)return;s.botTimer=0.5+Math.random()*0.6;
     const h=s.segments[0],wall=MAP_SIZE/2-250;
     if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=false;return;}
-    if(Math.random()<0.25){s.botWanderAngle+=(Math.random()-0.5)*2.5;s.targetAngle=s.botWanderAngle;s.boosting=false;return;}
-    let cl=null,cSq=250*250;
-    for(const f of this.food){const dx=f.x-h.x;if(dx>250||dx<-250)continue;const dy=f.y-h.y;if(dy>250||dy<-250)continue;const d2=dx*dx+dy*dy;if(d2<cSq){cSq=d2;cl=f;}}
-    if(cl)s.targetAngle=Math.atan2(cl.y-h.y,cl.x-h.x);else{s.botWanderAngle+=(Math.random()-0.5)*2;s.targetAngle=s.botWanderAngle;}
+    // Basic threat avoidance — don't blindly crash into other snakes
+    for(const[,o]of this.snakes){
+      if(o.id===s.id||!o.alive)continue;
+      // Check if any body segment is close and ahead of us
+      for(let k=0;k<Math.min(o.segments.length,20);k+=2){
+        const dx=o.segments[k].x-h.x,dy=o.segments[k].y-h.y;
+        const d=Math.sqrt(dx*dx+dy*dy);
+        if(d<100){
+          // Check if it's roughly ahead of us
+          const angleToSeg=Math.atan2(dy,dx);
+          let diff=angleToSeg-s.angle;while(diff>Math.PI)diff-=Math.PI*2;while(diff<-Math.PI)diff+=Math.PI*2;
+          if(Math.abs(diff)<Math.PI/2){
+            s.targetAngle=s.angle+(diff>0?-1:1)*Math.PI/2;
+            s.boosting=false;return;
+          }
+        }
+      }
+    }
+    if(Math.random()<0.15){s.botWanderAngle+=(Math.random()-0.5)*2;s.targetAngle=s.botWanderAngle;s.boosting=false;return;}
+    let cl=null,cSq=300*300;
+    for(const f of this.food){const dx=f.x-h.x;if(dx>300||dx<-300)continue;const dy=f.y-h.y;if(dy>300||dy<-300)continue;const d2=dx*dx+dy*dy;if(d2<cSq){cSq=d2;cl=f;}}
+    if(cl)s.targetAngle=Math.atan2(cl.y-h.y,cl.x-h.x);else{s.botWanderAngle+=(Math.random()-0.5)*1.5;s.targetAngle=s.botWanderAngle;}
     s.boosting=false;
   }
   _amtAI(s,dt){
@@ -475,18 +493,42 @@ class Room {
     else{s.botWanderAngle+=(Math.random()-0.5)*1.2;s.targetAngle=s.botWanderAngle;s.boosting=false;}
   }
   _advAI(s,dt){
-    s.botTimer-=dt;if(s.botTimer>0)return;s.botTimer=0.1;
+    s.botTimer-=dt;if(s.botTimer>0)return;s.botTimer=0.08;
     const h=s.segments[0],wall=MAP_SIZE/2-250;
     if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=false;return;}
+    // Check body segments ahead — avoid collisions with ANY snake body
+    for(const[,o]of this.snakes){
+      if(o.id===s.id||!o.alive)continue;
+      for(let k=0;k<Math.min(o.segments.length,30);k+=2){
+        const dx=o.segments[k].x-h.x,dy=o.segments[k].y-h.y;
+        const d=Math.sqrt(dx*dx+dy*dy);
+        if(d<80){
+          const aTo=Math.atan2(dy,dx);let diff=aTo-s.angle;while(diff>Math.PI)diff-=Math.PI*2;while(diff<-Math.PI)diff+=Math.PI*2;
+          if(Math.abs(diff)<Math.PI/3){s.targetAngle=s.angle+(diff>0?-1:1)*Math.PI/2.5;s.boosting=false;return;}
+        }
+      }
+    }
+    // Flee from bigger threats
     for(const[,o]of this.snakes){if(o.id===s.id||!o.alive)continue;const dx=o.segments[0].x-h.x,dy=o.segments[0].y-h.y,d=Math.sqrt(dx*dx+dy*dy);
-      if(d<220&&o.score>=s.score*0.85){s.targetAngle=Math.atan2(-dy,-dx)+(Math.random()<0.5?-0.3:0.3);s.boosting=d<130&&s.score>30;return;}}
-    let bm=null,bmd=1500;for(const m of this.megaOrbs){const d=Math.sqrt((m.x-h.x)**2+(m.y-h.y)**2);if(d<bmd){bmd=d;bm=m;}}
-    if(bm){const t=bmd/SNAKE_SPEED;s.targetAngle=Math.atan2(bm.y+bm.vy*t-h.y,bm.x+bm.vx*t-h.x);s.boosting=bmd>500&&s.score>20;return;}
-    let bp=null,bpd=700;for(const[,o]of this.snakes){if(o.id===s.id||!o.alive||o.score>=s.score*0.7)continue;const d=Math.sqrt((o.segments[0].x-h.x)**2+(o.segments[0].y-h.y)**2);if(d<bpd){bpd=d;bp=o;}}
-    if(bp){const la=0.8+bpd/400;s.targetAngle=Math.atan2(bp.segments[0].y+Math.sin(bp.angle)*SNAKE_SPEED*la-h.y,bp.segments[0].x+Math.cos(bp.angle)*SNAKE_SPEED*la-h.x);s.boosting=bpd>250&&s.score>40;return;}
-    let bf=null,br=0;for(const f of this.food){const dx=f.x-h.x;if(dx>800||dx<-800)continue;const dy=f.y-h.y;if(dy>800||dy<-800)continue;const ratio=(f.value||1)/(Math.sqrt(dx*dx+dy*dy)+50);if(ratio>br){br=ratio;bf=f;}}
+      if(d<250&&o.score>=s.score*0.8){s.targetAngle=Math.atan2(-dy,-dx)+(Math.random()<0.5?-0.4:0.4);s.boosting=d<150&&s.score>25;return;}}
+    // Hunt mega orbs with prediction
+    let bm=null,bmd=2000;for(const m of this.megaOrbs){const d=Math.sqrt((m.x-h.x)**2+(m.y-h.y)**2);if(d<bmd){bmd=d;bm=m;}}
+    if(bm){const t=bmd/SNAKE_SPEED;s.targetAngle=Math.atan2(bm.y+bm.vy*t-h.y,bm.x+bm.vx*t-h.x);s.boosting=bmd>400&&bmd<1200&&s.score>15;return;}
+    // Hunt smaller snakes — aim to cut off their path
+    let bp=null,bpd=900;for(const[,o]of this.snakes){if(o.id===s.id||!o.alive||o.score>=s.score*0.6)continue;const d=Math.sqrt((o.segments[0].x-h.x)**2+(o.segments[0].y-h.y)**2);if(d<bpd){bpd=d;bp=o;}}
+    if(bp){
+      // Aim perpendicular to prey's direction to cut them off
+      const la=0.6+bpd/300;
+      const predX=bp.segments[0].x+Math.cos(bp.angle)*SNAKE_SPEED*la;
+      const predY=bp.segments[0].y+Math.sin(bp.angle)*SNAKE_SPEED*la;
+      s.targetAngle=Math.atan2(predY-h.y,predX-h.x);
+      s.boosting=bpd>200&&bpd<600&&s.score>30;
+      return;
+    }
+    // High-value food with better range
+    let bf=null,br=0;for(const f of this.food){const dx=f.x-h.x;if(dx>1000||dx<-1000)continue;const dy=f.y-h.y;if(dy>1000||dy<-1000)continue;const ratio=(f.value||1)/(Math.sqrt(dx*dx+dy*dy)+40);if(ratio>br){br=ratio;bf=f;}}
     if(bf){s.targetAngle=Math.atan2(bf.y-h.y,bf.x-h.x);s.boosting=false;return;}
-    s.botWanderAngle+=(Math.random()-0.5)*0.5;s.targetAngle=s.botWanderAngle;s.boosting=false;
+    s.botWanderAngle+=(Math.random()-0.5)*0.4;s.targetAngle=s.botWanderAngle;s.boosting=false;
   }
 
   // --- Broadcasting ---
