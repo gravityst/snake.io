@@ -44,6 +44,8 @@
   const DOT_RADIUS = 9;
   const HEAD_RADIUS = 14;
   const BASE_ZOOM = 0.72;
+  // Multiplayer server URL (Render.com handles WebSocket + API only)
+  const SERVER_URL = 'https://snake-io-fzk5.onrender.com';
   const COLORS = ['#0ff', '#f0f', '#0f0', '#ff0', '#f80', '#08f', '#f44', '#8f0'];
 
   // --- Skins ---
@@ -188,7 +190,7 @@
     const mode = roomModeSelect.value;
     const teamSize = parseInt(roomTeamSizeSelect.value) || 2;
     try {
-      const res = await fetch('/api/rooms', {
+      const res = await fetch(SERVER_URL + '/api/rooms', {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ name: rName, mode, teamSize, creatorName: nameInput.value.trim() }),
       });
@@ -224,7 +226,7 @@
   // --- MULTIPLAYER ---
   async function fetchRooms() {
     try {
-      const res = await fetch('/api/rooms');
+      const res = await fetch(SERVER_URL + '/api/rooms');
       const rooms = await res.json();
       roomList.innerHTML = '';
       for (const room of rooms) {
@@ -259,7 +261,7 @@
     teamGrid.innerHTML = '';
     // If we have team data, show it. Otherwise fetch fresh.
     if (teams) renderTeams(teams);
-    else fetch('/api/rooms').then(r=>r.json()).then(rooms=>{
+    else fetch(SERVER_URL+'/api/rooms').then(r=>r.json()).then(rooms=>{
       const room = rooms.find(r=>r.id===roomId);
       if (room && room.teams) renderTeams(room.teams);
     });
@@ -301,8 +303,8 @@
   // =====================================================
   function connect(name, roomId, teamId) {
     if (ws) ws.close();
-    const proto = location.protocol==='https:'?'wss':'ws';
-    ws = new WebSocket(`${proto}://${location.host}?room=${encodeURIComponent(roomId)}`);
+    const wsUrl = SERVER_URL.replace('https://','wss://').replace('http://','ws://');
+    ws = new WebSocket(`${wsUrl}?room=${encodeURIComponent(roomId)}`);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
