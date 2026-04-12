@@ -145,7 +145,7 @@ class Room {
     }
   }
 
-  _createSnake(name,isBot,skinIdx,skill) {
+  _createSnake(name,isBot,skinIdx,skill,accessory) {
     const id=this.nextSnakeId++;
     const angle=Math.random()*Math.PI*2;
     const pos=isBot?this._zoned(1.2):this._zoned(2.5);
@@ -153,7 +153,7 @@ class Room {
     for(let i=0;i<INITIAL_LENGTH;i++) segments.push({x:pos.x-Math.cos(angle)*i*SEGMENT_SPACING,y:pos.y-Math.sin(angle)*i*SEGMENT_SPACING});
     const snake={
       id,name,segments,angle,targetAngle:angle,
-      boosting:false,score:0,skin:skinIdx,
+      boosting:false,score:0,skin:skinIdx,accessory:accessory||0,
       color:Math.floor(Math.random()*8),alive:true,isBot,
       skill:skill??SKILL_BEGINNER,
       boostAccum:0,botTimer:0,botWanderAngle:angle,
@@ -167,11 +167,11 @@ class Room {
 
   // --- Player join/leave ---
   // Protocol: join message is [0x03][skinIdx][teamId (if team mode)][name...]
-  playerJoin(ws, name, skinIdx, teamId) {
+  playerJoin(ws, name, skinIdx, teamId, accessory) {
     if (this.clients.has(ws)) return;
     if (this.realPlayerCount >= MAX_PLAYERS_PER_ROOM) return;
 
-    const snake = this._createSnake(name, false, skinIdx, SKILL_BEGINNER);
+    const snake = this._createSnake(name, false, skinIdx, SKILL_BEGINNER, accessory || 0);
 
     // Team assignment
     if (this.mode === 'team' && this.teams.has(teamId)) {
@@ -259,14 +259,15 @@ class Room {
     const type=buf[0];
     if (type===0x03) {
       const skinIdx = buf.length>1 ? buf[1] : 0;
+      const accessory = buf.length>2 ? buf[2] : 0;
       let teamId = -1;
-      let nameStart = 2;
-      if (this.mode==='team' && buf.length>2) {
-        teamId = buf[2];
-        nameStart = 3;
+      let nameStart = 3;
+      if (this.mode==='team' && buf.length>3) {
+        teamId = buf[3];
+        nameStart = 4;
       }
       const name = buf.slice(nameStart).toString('utf8').substring(0,16) || 'Player';
-      this.playerJoin(ws, name, skinIdx, teamId);
+      this.playerJoin(ws, name, skinIdx, teamId, accessory);
       return;
     }
     const playerId=this.clients.get(ws);
@@ -509,7 +510,7 @@ class Room {
       // per snake: [id u16][skin u8][boosting u8][isBot u8][teamId i8][invincible u8][score u16][nameLen u8][name][segCount u16][segs]
       let totalSegs=0,totalNameBytes=0;
       for(const s of visSnakes){totalSegs+=s.segments.length;totalNameBytes+=Buffer.byteLength(s.name,'utf8');}
-      const bufSize=1+2+visSnakes.length*(2+1+1+1+1+1+2+1+2)+totalNameBytes+totalSegs*4+2+visFood.length*7+2+visMega.length*7;
+      const bufSize=1+2+visSnakes.length*(2+1+1+1+1+1+1+2+1+2)+totalNameBytes+totalSegs*4+2+visFood.length*7+2+visMega.length*7;
       const buf=Buffer.alloc(bufSize);
       let off=0;
       buf[off++]=0x01;buf.writeUInt16LE(visSnakes.length,off);off+=2;
@@ -518,6 +519,7 @@ class Room {
         buf[off++]=snake.skin;buf[off++]=snake.boosting?1:0;buf[off++]=snake.isBot?1:0;
         buf.writeInt8(snake.teamId,off);off+=1;
         buf[off++]=snake.invincible>0?1:0;
+        buf[off++]=snake.accessory||0;
         buf.writeUInt16LE(Math.min(snake.score,65535),off);off+=2;
         const nb=Buffer.from(snake.name,'utf8');buf[off++]=nb.length;nb.copy(buf,off);off+=nb.length;
         buf.writeUInt16LE(snake.segments.length,off);off+=2;

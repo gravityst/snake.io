@@ -85,6 +85,94 @@
   ];
 
   let selectedSkin = 0;
+  let selectedAccessory = 0;
+
+  // --- Accessories ---
+  const ACCESSORIES = [
+    { name: 'None' },
+    { name: 'Crown' },
+    { name: 'Top Hat' },
+    { name: 'Sunglasses' },
+    { name: 'Halo' },
+    { name: 'Devil Horns' },
+    { name: 'Party Hat' },
+    { name: 'Ninja Band' },
+    { name: 'Flower' },
+    { name: 'Antenna' },
+  ];
+
+  function drawAccessory(ctx, accId, hx, hy, headR, angle) {
+    if (accId <= 0 || accId >= ACCESSORIES.length) return;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const topX = hx - sin * headR * 0.9, topY = hy + cos * headR * 0.9; // top of head (perpendicular to direction)
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(angle - Math.PI/2); // rotate so "up" is away from movement direction
+    const r = headR;
+
+    if (accId === 1) { // Crown
+      ctx.fillStyle = '#fc0';
+      ctx.beginPath();
+      ctx.moveTo(-r*0.6, -r*0.5);
+      ctx.lineTo(-r*0.6, -r*1.2);
+      ctx.lineTo(-r*0.3, -r*0.9);
+      ctx.lineTo(0, -r*1.3);
+      ctx.lineTo(r*0.3, -r*0.9);
+      ctx.lineTo(r*0.6, -r*1.2);
+      ctx.lineTo(r*0.6, -r*0.5);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle='#da0';ctx.lineWidth=1;ctx.stroke();
+    } else if (accId === 2) { // Top Hat
+      ctx.fillStyle = '#111';
+      ctx.fillRect(-r*0.5, -r*1.6, r*1.0, r*0.9);
+      ctx.fillRect(-r*0.7, -r*0.7, r*1.4, r*0.2);
+      ctx.strokeStyle='#444';ctx.lineWidth=1;
+      ctx.strokeRect(-r*0.5, -r*1.6, r*1.0, r*0.9);
+      ctx.fillStyle='#0ff';ctx.fillRect(-r*0.45, -r*0.9, r*0.9, r*0.12);
+    } else if (accId === 3) { // Sunglasses
+      ctx.rotate(Math.PI/2); // face forward
+      const ey = -r*0.15;
+      ctx.fillStyle='rgba(0,0,0,0.8)';
+      ctx.fillRect(-r*0.65, ey-r*0.2, r*0.5, r*0.35);
+      ctx.fillRect(r*0.15, ey-r*0.2, r*0.5, r*0.35);
+      ctx.fillRect(-r*0.15, ey-r*0.05, r*0.3, r*0.08);
+      ctx.strokeStyle='#888';ctx.lineWidth=1;
+      ctx.strokeRect(-r*0.65, ey-r*0.2, r*0.5, r*0.35);
+      ctx.strokeRect(r*0.15, ey-r*0.2, r*0.5, r*0.35);
+    } else if (accId === 4) { // Halo
+      ctx.strokeStyle='#fc0';ctx.lineWidth=2;ctx.globalAlpha=0.8;
+      ctx.beginPath();ctx.ellipse(0, -r*1.3, r*0.55, r*0.15, 0, 0, Math.PI*2);ctx.stroke();
+      ctx.globalAlpha=1;
+    } else if (accId === 5) { // Devil Horns
+      ctx.fillStyle='#d22';
+      ctx.beginPath();ctx.moveTo(-r*0.5,-r*0.5);ctx.lineTo(-r*0.35,-r*1.5);ctx.lineTo(-r*0.1,-r*0.7);ctx.closePath();ctx.fill();
+      ctx.beginPath();ctx.moveTo(r*0.5,-r*0.5);ctx.lineTo(r*0.35,-r*1.5);ctx.lineTo(r*0.1,-r*0.7);ctx.closePath();ctx.fill();
+    } else if (accId === 6) { // Party Hat
+      const grad = ctx.createLinearGradient(0,-r*1.8,0,-r*0.5);
+      grad.addColorStop(0,'#f0f');grad.addColorStop(0.5,'#0ff');grad.addColorStop(1,'#ff0');
+      ctx.fillStyle=grad;
+      ctx.beginPath();ctx.moveTo(0,-r*1.8);ctx.lineTo(-r*0.5,-r*0.5);ctx.lineTo(r*0.5,-r*0.5);ctx.closePath();ctx.fill();
+      ctx.fillStyle='#ff0';ctx.beginPath();ctx.arc(0,-r*1.8,r*0.15,0,Math.PI*2);ctx.fill();
+    } else if (accId === 7) { // Ninja Band
+      ctx.fillStyle='#333';ctx.fillRect(-r*0.8,-r*0.15,r*1.6,r*0.3);
+      ctx.fillStyle='#c00';
+      ctx.beginPath();ctx.moveTo(r*0.8,0);ctx.lineTo(r*1.3,-r*0.3);ctx.lineTo(r*1.1,r*0.1);ctx.closePath();ctx.fill();
+      ctx.beginPath();ctx.moveTo(r*0.8,0);ctx.lineTo(r*1.4,r*0.1);ctx.lineTo(r*1.0,r*0.3);ctx.closePath();ctx.fill();
+    } else if (accId === 8) { // Flower
+      const cols=['#f44','#f80','#ff0','#f0f','#f44'];
+      for(let i=0;i<5;i++){
+        ctx.fillStyle=cols[i];
+        const a=i*Math.PI*2/5-Math.PI/2;
+        ctx.beginPath();ctx.arc(Math.cos(a)*r*0.5,-r*1.0+Math.sin(a)*r*0.5,r*0.2,0,Math.PI*2);ctx.fill();
+      }
+      ctx.fillStyle='#ff0';ctx.beginPath();ctx.arc(0,-r*1.0,r*0.15,0,Math.PI*2);ctx.fill();
+    } else if (accId === 9) { // Antenna
+      ctx.strokeStyle='#888';ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(0,-r*0.5);ctx.quadraticCurveTo(r*0.2,-r*1.5,0,-r*1.8);ctx.stroke();
+      ctx.fillStyle='#0ff';ctx.beginPath();ctx.arc(0,-r*1.8,r*0.2,0,Math.PI*2);ctx.fill();
+    }
+    ctx.restore();
+  }
 
   // --- Skin picker ---
   function buildSkinGrid() {
@@ -117,7 +205,102 @@
   }
   buildSkinGrid();
 
-  skinsBtn.addEventListener('click', () => { startScreen.style.display='none'; skinScreen.style.display='flex'; });
+  // --- Accessory picker ---
+  function buildAccessoryGrid() {
+    const grid = document.getElementById('accessoryGrid');
+    grid.innerHTML = '';
+    ACCESSORIES.forEach((acc, idx) => {
+      const card = document.createElement('div');
+      card.className = 'acc-card' + (idx === selectedAccessory ? ' selected' : '');
+      // Mini canvas preview
+      const c = document.createElement('canvas');
+      c.width = 50; c.height = 40;
+      const cx = c.getContext('2d');
+      // Draw mini head with accessory
+      const hr = 12;
+      cx.fillStyle = '#0ff'; cx.beginPath(); cx.arc(25, 25, hr, 0, Math.PI*2); cx.fill();
+      // Eyes
+      cx.fillStyle='#fff';cx.beginPath();cx.arc(21,22,3,0,Math.PI*2);cx.fill();cx.beginPath();cx.arc(29,22,3,0,Math.PI*2);cx.fill();
+      cx.fillStyle='#111';cx.beginPath();cx.arc(21,22,1.5,0,Math.PI*2);cx.fill();cx.beginPath();cx.arc(29,22,1.5,0,Math.PI*2);cx.fill();
+      if (idx > 0) drawAccessory(cx, idx, 25, 25, hr, -Math.PI/2);
+      card.appendChild(c);
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'acc-name'; nameDiv.textContent = acc.name;
+      card.appendChild(nameDiv);
+      card.addEventListener('click', () => {
+        selectedAccessory = idx;
+        document.querySelectorAll('.acc-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+      });
+      grid.appendChild(card);
+    });
+  }
+  buildAccessoryGrid();
+
+  // --- Animated skin preview ---
+  const skinPreview = document.getElementById('skinPreview');
+  const spCtx = skinPreview.getContext('2d');
+  let previewAnim = 0;
+
+  function updateSkinPreview() {
+    if (skinScreen.style.display !== 'flex') return;
+    previewAnim += 0.03;
+    const w = skinPreview.width, h = skinPreview.height;
+    spCtx.clearRect(0, 0, w, h);
+    spCtx.fillStyle = 'rgba(0,10,20,0.3)';
+    spCtx.fillRect(0, 0, w, h);
+
+    const skin = SKINS[selectedSkin] || SKINS[0];
+    const segCount = 14;
+    const spacing = 18;
+    const hr = 10;
+
+    // Generate a wiggling snake path
+    const segs = [];
+    for (let i = 0; i < segCount; i++) {
+      const t = i / segCount;
+      const wave = Math.sin(previewAnim * 3 + i * 0.5) * 12;
+      segs.push({
+        x: w * 0.7 - i * spacing,
+        y: h / 2 + wave
+      });
+    }
+
+    // Draw body dots
+    for (let i = segs.length - 1; i >= 1; i--) {
+      const s = segs[i];
+      const tailT = i / segs.length;
+      const r = (hr - 2) * (1 - tailT * 0.3);
+      spCtx.fillStyle = skin.colors[i % skin.colors.length];
+      spCtx.globalAlpha = 0.95;
+      spCtx.beginPath(); spCtx.arc(s.x, s.y, r, 0, Math.PI * 2); spCtx.fill();
+    }
+    spCtx.globalAlpha = 1;
+
+    // Head
+    const head = segs[0];
+    const angle = Math.atan2(head.y - segs[1].y, head.x - segs[1].x);
+    spCtx.fillStyle = skin.colors[0];
+    spCtx.beginPath(); spCtx.arc(head.x, head.y, hr, 0, Math.PI * 2); spCtx.fill();
+
+    // Eyes
+    const eyeOff = hr * 0.5, eyeR = hr * 0.28, perp = angle + Math.PI / 2;
+    for (const side of [-1, 1]) {
+      const ex = head.x + Math.cos(angle) * hr * 0.3 + Math.cos(perp) * eyeOff * side;
+      const ey = head.y + Math.sin(angle) * hr * 0.3 + Math.sin(perp) * eyeOff * side;
+      spCtx.fillStyle = '#fff'; spCtx.beginPath(); spCtx.arc(ex, ey, eyeR, 0, Math.PI * 2); spCtx.fill();
+      spCtx.fillStyle = '#111'; spCtx.beginPath();
+      spCtx.arc(ex + Math.cos(angle) * eyeR * 0.3, ey + Math.sin(angle) * eyeR * 0.3, eyeR * 0.55, 0, Math.PI * 2);
+      spCtx.fill();
+    }
+
+    // Accessory
+    drawAccessory(spCtx, selectedAccessory, head.x, head.y, hr, angle);
+
+    requestAnimationFrame(updateSkinPreview);
+  }
+
+  skinsBtn.addEventListener('click', () => { startScreen.style.display='none'; skinScreen.style.display='flex'; updateSkinPreview(); });
   skinBackBtn.addEventListener('click', () => { skinScreen.style.display='none'; startScreen.style.display='flex'; });
 
   // --- Helpers ---
@@ -180,6 +363,7 @@
 
   // --- Kill counter ---
   let myKills = 0;
+  const snakeNameCache = new Map(); // id → name, persists after death
 
   // --- Top snake tracking ---
   let topSnakeId = null;
@@ -439,10 +623,10 @@
       if (connId !== myConnId) return; // stale connection
       const nameBytes = new TextEncoder().encode(name.substring(0,16));
       const hasTeam = teamId !== undefined && teamId >= 0;
-      const buf = new Uint8Array((hasTeam ? 3 : 2) + nameBytes.length);
-      buf[0]=0x03; buf[1]=selectedSkin;
-      if (hasTeam) { buf[2]=teamId; buf.set(nameBytes,3); }
-      else buf.set(nameBytes,2);
+      const buf = new Uint8Array((hasTeam ? 4 : 3) + nameBytes.length);
+      buf[0]=0x03; buf[1]=selectedSkin; buf[2]=selectedAccessory;
+      if (hasTeam) { buf[3]=teamId; buf.set(nameBytes,4); }
+      else buf.set(nameBytes,3);
       ws.send(buf);
     };
     ws.onmessage = (event) => {
@@ -461,8 +645,8 @@
         if(killed&&killed.segments.length>0) spawnDeathParticles(killed.segments[0].x,killed.segments[0].y,killed.skin);
         if(killedId===myId) screenShake=15;
         // Kill feed
-        const killerName = killer ? killer.name : '???';
-        const killedName = killed ? killed.name : '???';
+        const killerName = killer ? killer.name : (snakeNameCache.get(killerId) || '???');
+        const killedName = killed ? killed.name : (snakeNameCache.get(killedId) || '???');
         killFeed.push({ text: killerName + ' killed ' + killedName, timer: 4 });
         // Store killer position for death cam
         if (killer && killer.segments.length > 0) {
@@ -495,13 +679,14 @@
       const isBot=buf.getUint8(off)===1; off+=1;
       const teamId=buf.getInt8(off); off+=1;
       const invincible=buf.getUint8(off)===1; off+=1;
+      const accessory=buf.getUint8(off); off+=1;
       const score=buf.getUint16(off,true); off+=2;
       const nameLen=buf.getUint8(off); off+=1;
       const name=new TextDecoder().decode(new Uint8Array(buf.buffer,off,nameLen)); off+=nameLen;
       const segCount=buf.getUint16(off,true); off+=2;
       const segments=[];
       for (let j=0;j<segCount;j++) { segments.push({x:buf.getInt16(off,true),y:buf.getInt16(off+2,true)}); off+=4; }
-      newSnakes.push({id,skin,boosting:isBoosting,isBot,teamId,invincible,score,name,segments,alive:true});
+      newSnakes.push({id,skin,boosting:isBoosting,isBot,teamId,invincible,accessory,score,name,segments,alive:true});
     }
     const foodCount=buf.getUint16(off,true); off+=2;
     const newFood=[];
@@ -516,6 +701,8 @@
       off+=7;
     }
     snakes=newSnakes; food=newFood; megaOrbs=newMega;
+    // Cache snake names for kill feed (names persist after death)
+    for (const s of newSnakes) snakeNameCache.set(s.id, s.name);
     // Ping tracking
     if (lastPingSent > 0) { ping = performance.now() - lastPingSent; }
     const me=snakes.find(s=>s.id===myId);
@@ -680,6 +867,8 @@
     }
     // Crown on #1 snake
     if(snake.id===topSnakeId) drawCrown(hx, hy, headR);
+    // Accessory
+    if(snake.accessory > 0) drawAccessory(ctx, snake.accessory, hx, hy, headR, angle);
     if(snake.boosting&&segs.length>2&&Math.random()<0.4){const tail=segs[segs.length-1];spawnEatParticles(tail.x,tail.y,snake.skin);}
     // Name + AI badge
     ctx.font='bold 13px "Segoe UI",sans-serif';ctx.textAlign='center';

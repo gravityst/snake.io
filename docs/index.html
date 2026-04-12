@@ -375,6 +375,17 @@
     }
     .create-form select { appearance: none; cursor: pointer; }
     .create-form select option { background: #0a0a1a; color: #fff; }
+    .acc-card {
+      width: 110px; height: 70px; border: 1.5px solid rgba(255,255,255,0.12);
+      border-radius: 14px; background: rgba(0,20,40,0.4); backdrop-filter: blur(6px);
+      cursor: pointer; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 4px; transition: transform 0.2s, border-color 0.3s;
+      position: relative; overflow: hidden;
+    }
+    .acc-card:hover { transform: scale(1.06); border-color: rgba(255,136,0,0.5); }
+    .acc-card.selected { border-color: #f80; box-shadow: 0 0 20px rgba(255,136,0,0.2); background: rgba(40,20,0,0.4); }
+    .acc-card canvas { pointer-events: none; }
+    .acc-card .acc-name { color: rgba(255,255,255,0.6); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
   </style>
 </head>
 <body>
@@ -437,7 +448,10 @@
 
   <div id="skinScreen">
     <h2>CHOOSE SKIN</h2>
+    <canvas id="skinPreview" width="320" height="120" style="border:1px solid rgba(0,255,255,0.15);border-radius:12px;background:rgba(0,10,20,0.5);margin-bottom:16px;"></canvas>
     <div class="skin-grid" id="skinGrid"></div>
+    <h3 style="color:#fff;margin:16px 0 10px;letter-spacing:2px;font-size:16px;text-shadow:0 0 10px rgba(255,136,0,0.4);">ACCESSORIES</h3>
+    <div class="skin-grid" id="accessoryGrid" style="max-width:520px;"></div>
     <button class="glass-btn skin-back-btn" id="skinBackBtn">BACK</button>
   </div>
 
