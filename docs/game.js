@@ -280,9 +280,10 @@
       c.width = 50; c.height = 50;
       const cx = c.getContext('2d');
       if (idx === 0) {
-        cx.fillStyle='rgba(255,255,255,0.2)';cx.font='20px sans-serif';cx.textAlign='center';cx.fillText('—',25,30);
+        cx.fillStyle='rgba(255,255,255,0.3)';cx.font='18px sans-serif';cx.textAlign='center';cx.fillText('✕',25,32);
       } else {
-        drawAccessory(cx, idx, 25, 30, 14, -Math.PI/2);
+        try { drawAccessory(cx, idx, 25, 30, 14, -Math.PI/2); }
+        catch(e) { cx.fillStyle='#f44';cx.font='10px sans-serif';cx.textAlign='center';cx.fillText('ERR',25,30); }
       }
       card.appendChild(c);
       const nameDiv = document.createElement('div');
@@ -678,7 +679,7 @@
       card.className = 'team-card';
       card.innerHTML = `<div class="team-color" style="background:${team.color};box-shadow:0 0 10px ${team.color}"></div>
         <div class="team-name">${team.name}</div>
-        <div class="team-count">${team.members} players</div>`;
+        <div class="team-count">${team.members} ${team.members === 1 ? 'bot' : 'bots'}</div>`;
       card.addEventListener('click', () => {
         selectedTeamId = team.id;
         startMultiplayerGame(pendingRoomId, team.id);
