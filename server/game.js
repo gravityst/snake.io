@@ -4,8 +4,8 @@ const WebSocket = require('ws');
 // Room-based multiplayer server with Solo + Team modes
 // =====================================================
 
-const MAP_SIZE = 9000;
-const FOOD_COUNT = 1000;
+const MAP_SIZE = 14000;
+const FOOD_COUNT = 1800;
 const SNAKE_SPEED = 200;
 const BOOST_SPEED = 380;
 const SEGMENT_SPACING = 24;
@@ -97,7 +97,7 @@ class Room {
     const a = Math.random() * Math.PI * 2;
     return { x: Math.cos(a)*r, y: Math.sin(a)*r };
   }
-  _thickness(s) { return 1 + Math.min(s.score/500, 0.8); }
+  _thickness(s) { return 1 + 0.6 * Math.log10(1 + s.score / 50); }
   _randomSkill() {
     const adv = this.bots.filter(id => { const s=this.snakes.get(id); return s&&s.alive&&s.skill===SKILL_ADVANCED; }).length;
     const r = Math.random();
@@ -365,7 +365,7 @@ class Room {
       const dist=Math.sqrt(dx*dx+dy*dy),t=SEGMENT_SPACING/dist;
       snake.segments.splice(1,0,{x:snake.segments[1].x+dx*t,y:snake.segments[1].y+dy*t});
     }
-    const tl=INITIAL_LENGTH+Math.floor(snake.score/12);
+    const tl=INITIAL_LENGTH+Math.floor(8*Math.log(1+snake.score/10));
     while(snake.segments.length>tl)snake.segments.pop();
     if(snake.boosting&&snake.score>0){
       snake.boostAccum+=BOOST_SHRINK_RATE*dt;

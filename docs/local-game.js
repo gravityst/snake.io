@@ -5,8 +5,8 @@
 
 class LocalGame {
   constructor(playerName, skinIdx) {
-    this.MAP_SIZE = 9000;
-    this.FOOD_COUNT = 1000;
+    this.MAP_SIZE = 14000;
+    this.FOOD_COUNT = 1800;
     this.SNAKE_SPEED = 200;
     this.BOOST_SPEED = 380;
     this.SEGMENT_SPACING = 24;
@@ -157,7 +157,7 @@ class LocalGame {
       const dist=Math.sqrt(dx*dx+dy*dy), t=this.SEGMENT_SPACING/dist;
       snake.segments.splice(1,0,{x:snake.segments[1].x+dx*t, y:snake.segments[1].y+dy*t});
     }
-    const tl = this.INITIAL_LENGTH + Math.floor(snake.score/12);
+    const tl = this.INITIAL_LENGTH + Math.floor(8*Math.log(1+snake.score/10));
     while (snake.segments.length > tl) snake.segments.pop();
     if (snake.boosting && snake.score > 0) {
       snake.boostAccum += this.BOOST_SHRINK_RATE*dt;

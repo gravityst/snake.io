@@ -40,7 +40,7 @@
   const roomTeamSizeSelect = document.getElementById('roomTeamSizeSelect');
 
   // --- Config ---
-  const MAP_SIZE = 9000;
+  const MAP_SIZE = 14000;
   const DOT_RADIUS = 9;
   const HEAD_RADIUS = 14;
   const BASE_ZOOM = 0.72;
@@ -123,7 +123,8 @@
   // --- Helpers ---
   function hexFull(c) { if (c.length===4) return '#'+c[1]+c[1]+c[2]+c[2]+c[3]+c[3]; return c; }
   function getSegColor(snake, i) { const skin = SKINS[snake.skin]||SKINS[0]; return skin.colors[i%skin.colors.length]; }
-  function getThickness(snake) { return 1 + Math.min(snake.score/500, 0.8); }
+  // Logarithmic — never caps, but slows down. 0→1.0, 100→1.48, 500→1.85, 2000→2.20, 10000→2.60
+  function getThickness(snake) { return 1 + 0.6 * Math.log10(1 + snake.score / 50); }
 
   // --- Game state ---
   let snakes = [], food = [], megaOrbs = [], particles = [];
@@ -934,7 +935,8 @@
     let shakeX=0,shakeY=0;
     if(screenShake>0){shakeX=(Math.random()-0.5)*screenShake;shakeY=(Math.random()-0.5)*screenShake;screenShake*=0.9;if(screenShake<0.5)screenShake=0;}
     const cx=camera.x+shakeX, cy=camera.y+shakeY;
-    const targetZoom=Math.max(0.48,BASE_ZOOM-Math.min(lastScore/800,0.24));
+    // Logarithmic zoom — gradual, never jarring. 0→0.72, 500→0.60, 2000→0.52, 10000→0.44
+    const targetZoom=Math.max(0.38, BASE_ZOOM - 0.08 * Math.log10(1 + lastScore / 50));
     zoom+=(targetZoom-zoom)*0.05;
 
     ctx.setTransform(1,0,0,1,0,0);
