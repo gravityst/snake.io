@@ -1323,12 +1323,10 @@
     const dt = 0.016;
     menuAnimTime += dt;
 
-    // Only show when a menu screen is visible
-    const showBg = startScreen.style.display === 'flex' || skinScreen.style.display === 'flex'
-      || roomScreen.style.display === 'flex' || deathScreen.style.display === 'flex'
-      || teamScreen.style.display === 'flex' || createRoomScreen.style.display === 'flex';
-    menuBg.style.display = showBg ? 'block' : 'none';
-    if (!showBg) return;
+    // Show bg when not actively in gameplay (hud visible = in game)
+    const inGame = hud.style.display === 'block' && !deathScreen.style.display;
+    menuBg.style.display = inGame ? 'none' : 'block';
+    if (inGame) return;
 
     mbCtx.clearRect(0, 0, menuBg.width, menuBg.height);
     mbCtx.fillStyle = '#0a0a1a';
