@@ -401,14 +401,13 @@ class Room {
     for(let i=0;i<arr.length;i++){
       const a=arr[i];if(!a.alive)continue;
       if(a.invincible>0) continue; // spawn invincibility
-      const ahead=a.segments[0],aHeadR=HEAD_RADIUS*this._thickness(a);
+      const ahead=a.segments[0],aHeadR=HEAD_RADIUS*this._thickness(a)*0.75;
       for(let j=0;j<arr.length;j++){
         if(i===j)continue;
         const b=arr[j];if(!b.alive)continue;
-        if(b.invincible>0) continue; // skip invincible snakes as obstacle
-        // TEAM MODE: teammates can't collide
+        if(b.invincible>0) continue;
         if(this.mode==='team'&&a.teamId>=0&&a.teamId===b.teamId) continue;
-        const bDotR=DOT_RADIUS*this._thickness(b);
+        const bDotR=DOT_RADIUS*this._thickness(b)*0.75;
         const dist=aHeadR+bDotR,distSq=dist*dist;
         for(let k=1;k<b.segments.length;k++){
           const seg=b.segments[k],dx=ahead.x-seg.x,dy=ahead.y-seg.y;

@@ -189,11 +189,11 @@ class LocalGame {
   _checkCollisions() {
     for (let i=0;i<this.snakes.length;i++) {
       const a=this.snakes[i]; if(!a.alive) continue;
-      const ah=a.segments[0], aR=this.HEAD_RADIUS*this._thickness(a);
+      const ah=a.segments[0], aR=this.HEAD_RADIUS*this._thickness(a)*0.75;
       for (let j=0;j<this.snakes.length;j++) {
         if(i===j) continue;
         const b=this.snakes[j]; if(!b.alive) continue;
-        const bR=this.DOT_RADIUS*this._thickness(b);
+        const bR=this.DOT_RADIUS*this._thickness(b)*0.75;
         const dist=aR+bR, distSq=dist*dist;
         for (let k=1;k<b.segments.length;k++) {
           const s=b.segments[k], dx=ah.x-s.x, dy=ah.y-s.y;
