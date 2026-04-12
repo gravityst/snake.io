@@ -306,26 +306,31 @@
     startScreen.style.display='none'; skinScreen.style.display='none';
     roomScreen.style.display='none'; deathScreen.style.display='none';
     teamScreen.style.display='none'; createRoomScreen.style.display='none';
+    hud.style.display='none';
   }
 
   // =====================================================
   // WebSocket (multiplayer mode only)
   // =====================================================
-  let intentionalClose = false;
+  let connId = 0; // incremented on disconnect to invalidate old sockets
 
   function disconnect() {
-    intentionalClose = true;
-    if (ws) { ws.close(); ws = null; }
+    connId++;
+    if (ws) {
+      try { ws.close(); } catch(e) {}
+      ws = null;
+    }
   }
 
   function connect(name, roomId, teamId) {
-    disconnect(); // cleanly close any old connection
-    intentionalClose = false;
+    disconnect();
+    const myConnId = ++connId; // unique ID for this connection
     const wsUrl = SERVER_URL.replace('https://','wss://').replace('http://','ws://');
     ws = new WebSocket(`${wsUrl}?room=${encodeURIComponent(roomId)}`);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
+      if (connId !== myConnId) return; // stale connection
       const nameBytes = new TextEncoder().encode(name.substring(0,16));
       const hasTeam = teamId !== undefined && teamId >= 0;
       const buf = new Uint8Array((hasTeam ? 3 : 2) + nameBytes.length);
@@ -335,6 +340,7 @@
       ws.send(buf);
     };
     ws.onmessage = (event) => {
+      if (connId !== myConnId) return; // stale connection
       const buf = new DataView(event.data);
       if (buf.byteLength<1) return;
       const type = buf.getUint8(0);
@@ -349,7 +355,12 @@
       }
       else if (type===0x05) parseLeaderboard(buf);
     };
-    ws.onclose = () => { if(running && !intentionalClose) setTimeout(()=>connect(name,roomId,teamId),2000); };
+    ws.onclose = () => {
+      // Only auto-reconnect if this is still the active connection
+      if (connId === myConnId && running) {
+        setTimeout(() => { if (connId === myConnId) connect(name,roomId,teamId); }, 2000);
+      }
+    };
   }
 
   function parseState(buf) {
