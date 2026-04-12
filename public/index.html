@@ -291,6 +291,44 @@
       color: rgba(255,255,255,0.3);
       font-size: 12px;
     }
+
+    /* Button row on start screen */
+    .btn-row { display: flex; gap: 12px; margin-bottom: 12px; }
+    .btn-row .glass-btn { flex: 1; width: 180px; font-size: 18px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .multiplayer-btn { border-color: rgba(0,255,255,0.55) !important; }
+    .multiplayer-btn svg { width: 20px; height: 20px; stroke: #0ff; fill: none; stroke-width: 1.5; flex-shrink: 0; }
+
+    /* Room select screen */
+    #roomScreen {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 100; background: radial-gradient(ellipse at center, #0d1b2a 0%, #0a0a1a 70%);
+    }
+    #roomScreen h2 { font-size: 36px; color: #fff; text-shadow: 0 0 15px #0ff; margin-bottom: 24px; letter-spacing: 3px; }
+    .room-list { display: flex; flex-direction: column; gap: 10px; max-height: 55vh; overflow-y: auto; width: 420px; padding: 0 10px; margin-bottom: 24px; }
+    .room-card {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 14px 20px; border: 1.5px solid rgba(0,255,255,0.15); border-radius: 16px;
+      background: rgba(0,20,40,0.4); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      cursor: pointer; transition: transform 0.2s, border-color 0.3s, box-shadow 0.3s;
+      position: relative; overflow: hidden;
+    }
+    .room-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 45%;
+      background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, transparent 100%);
+      border-radius: 16px 16px 0 0; pointer-events: none;
+    }
+    .room-card:hover { transform: scale(1.03); border-color: rgba(0,255,255,0.5); box-shadow: 0 0 20px rgba(0,255,255,0.12); }
+    .room-card.full { opacity: 0.4; cursor: not-allowed; }
+    .room-card .room-name { color: #fff; font-size: 16px; font-weight: bold; letter-spacing: 1px; }
+    .room-card .room-players { color: #0ff; font-size: 14px; font-weight: bold; }
+
+    /* AI badge */
+    .ai-badge {
+      font-size: 9px; background: rgba(0,255,255,0.12); border: 1px solid rgba(0,255,255,0.35);
+      border-radius: 4px; padding: 1px 5px; margin-left: 6px; color: #0ff; font-weight: bold;
+      letter-spacing: 1px; vertical-align: middle;
+    }
   </style>
 </head>
 <body>
@@ -299,9 +337,21 @@
   <div id="startScreen">
     <h1>SNAKE.IO</h1>
     <input type="text" id="nameInput" placeholder="Enter your name" maxlength="16" autofocus>
-    <button class="glass-btn" id="playBtn">PLAY</button>
-    <button class="glass-btn" id="skinsBtn" style="width:300px; font-size:18px; margin-top:12px; border-color: rgba(255,0,255,0.4); background: linear-gradient(135deg, rgba(255,0,255,0.08), rgba(0,136,255,0.10), rgba(255,0,255,0.06));">SKINS</button>
+    <div class="btn-row">
+      <button class="glass-btn" id="playAIBtn">PLAY VS AI</button>
+      <button class="glass-btn multiplayer-btn" id="multiplayerBtn">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z"/></svg>
+        MULTIPLAYER
+      </button>
+    </div>
+    <button class="glass-btn" id="skinsBtn" style="width:372px; font-size:18px; border-color: rgba(255,0,255,0.4); background: linear-gradient(135deg, rgba(255,0,255,0.08), rgba(0,136,255,0.10), rgba(255,0,255,0.06));">SKINS</button>
     <p class="subtitle">Use mouse to steer — Click or Space to boost</p>
+  </div>
+
+  <div id="roomScreen">
+    <h2>SELECT ROOM</h2>
+    <div class="room-list" id="roomList"></div>
+    <button class="glass-btn skin-back-btn" id="roomBackBtn">BACK</button>
   </div>
 
   <div id="skinScreen">
@@ -327,6 +377,7 @@
     <div id="ping"></div>
   </div>
 
+  <script src="local-game.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
