@@ -298,15 +298,13 @@
   }
   buildAccessoryGrid();
 
-  // --- Tab switching ---
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById(btn.dataset.tab).classList.add('active');
-    });
-  });
+  // --- Tab switching (exposed globally for inline onclick) ---
+  window.switchTab = function(tabId, btn) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+  };
 
   // --- Custom skin creator ---
   let customColors = ['#00ffff'];

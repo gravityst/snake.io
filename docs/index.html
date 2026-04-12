@@ -109,11 +109,11 @@
       display: none;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
       z-index: 100;
       background: transparent;
+      overflow-y: auto;
+      padding: 30px 0 40px;
     }
-    #skinScreen { overflow-y: auto; }
     #skinScreen h2 {
       font-size: 32px; color: #fff; text-shadow: 0 0 15px #0ff;
       margin-bottom: 12px; letter-spacing: 3px;
@@ -414,9 +414,9 @@
     <h2>CUSTOMIZE</h2>
     <canvas id="skinPreview" width="400" height="140" style="border:1px solid rgba(0,255,255,0.12);border-radius:14px;background:rgba(0,8,16,0.7);margin-bottom:12px;"></canvas>
     <div class="tab-bar">
-      <button class="tab-btn active" data-tab="skinsTab">SKINS</button>
-      <button class="tab-btn" data-tab="accessoriesTab">ACCESSORIES</button>
-      <button class="tab-btn" data-tab="createTab">CREATE SKIN</button>
+      <button class="tab-btn active" onclick="switchTab('skinsTab',this)">SKINS</button>
+      <button class="tab-btn" onclick="switchTab('accessoriesTab',this)">ACCESSORIES</button>
+      <button class="tab-btn" onclick="switchTab('createTab',this)">CREATE SKIN</button>
     </div>
     <div class="tab-panel active" id="skinsTab">
       <div class="skin-grid" id="skinGrid"></div>
