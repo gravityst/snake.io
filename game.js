@@ -334,6 +334,12 @@
     };
   }
 
+  // --- Expand short hex (#0ff) to full (#00ffff) so we can append alpha ---
+  function hexFull(c) {
+    if (c.length === 4) return '#' + c[1]+c[1] + c[2]+c[2] + c[3]+c[3];
+    return c;
+  }
+
   // --- Get color for a specific segment index of a snake ---
   function getSegColor(snake, segIndex) {
     const skin = SKINS[snake.skin] || SKINS[0];
@@ -843,7 +849,7 @@
       // Outer halo for larger food
       if (tier >= 3) {
         const haloGrad = ctx.createRadialGradient(sx, sy, r, sx, sy, r * 2.5);
-        haloGrad.addColorStop(0, color + '55');
+        haloGrad.addColorStop(0, hexFull(color) + '55');
         haloGrad.addColorStop(1, 'transparent');
         ctx.fillStyle = haloGrad;
         ctx.beginPath();
@@ -885,8 +891,8 @@
 
       // Big outer halo
       const halo = ctx.createRadialGradient(sx, sy, r * 0.5, sx, sy, r * 3.5);
-      halo.addColorStop(0, color + 'aa');
-      halo.addColorStop(0.4, color + '33');
+      halo.addColorStop(0, hexFull(color) + 'aa');
+      halo.addColorStop(0.4, hexFull(color) + '33');
       halo.addColorStop(1, 'transparent');
       ctx.fillStyle = halo;
       ctx.beginPath();
