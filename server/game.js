@@ -5,7 +5,8 @@ const WebSocket = require('ws');
 // =====================================================
 
 const MAP_SIZE = 14000;
-const FOOD_COUNT = 1800;
+const FOOD_COUNT = 1200;
+const MAX_FOOD = 2000; // hard cap including kill drops
 const SNAKE_SPEED = 200;
 const BOOST_SPEED = 380;
 const SEGMENT_SPACING = 24;
@@ -291,13 +292,14 @@ class Room {
     const snake=this.snakes.get(id);
     if(!snake||!snake.alive) return;
     snake.alive=false;
-    // Drop food — bigger drops scaled by victim's score for rewarding kills
-    const dropValue = Math.max(3, Math.floor(snake.score / Math.max(1, snake.segments.length / 2)));
-    for(let i=0;i<snake.segments.length;i+=2){
+    // Drop food from body — every 3rd segment, capped to prevent food floods
+    const dropStep = Math.max(3, Math.floor(snake.segments.length / 15)); // at most ~15 drops
+    const dropValue = Math.max(2, Math.floor(snake.score / 20));
+    for(let i=0;i<snake.segments.length && this.food.length<MAX_FOOD;i+=dropStep){
       const s=snake.segments[i];
-      const r = 10 + Math.min(snake.score / 30, 12) + Math.random() * 4;
+      const r = 8 + Math.min(snake.score / 50, 8) + Math.random() * 3;
       const v = dropValue + Math.floor(Math.random() * 3);
-      const t = r > 16 ? 5 : r > 12 ? 3 : 2;
+      const t = r > 14 ? 4 : r > 10 ? 3 : 2;
       this.food.push({x:s.x+(Math.random()-0.5)*30,y:s.y+(Math.random()-0.5)*30,
         color:snake.color,radius:r,value:v,tier:t});
     }
@@ -347,6 +349,8 @@ class Room {
     for(const [,s] of this.snakes){if(s.alive) this._updateSnake(s,dt);}
     this._checkCollisions();
     this.spawnFood(); this.spawnMegaOrbs();
+    // Trim excess food from kill drops
+    while(this.food.length>MAX_FOOD) this.food.shift();
   }
 
   _updateSnake(snake,dt) {
@@ -420,33 +424,9 @@ class Room {
         if(!a.alive)break;
       }
     }
-    // Self-coil trap: ray-casting detection (every 10th tick for perf)
-    if(this.tickCount%10===0){
-      for(let i=0;i<arr.length;i++){
-        const a=arr[i];if(!a.alive||a.segments.length<20) continue;
-        for(let j=0;j<arr.length;j++){
-          if(i===j)continue;
-          const b=arr[j];if(!b.alive)continue;
-          if(b.invincible>0) continue;
-          if(this.mode==='team'&&a.teamId>=0&&a.teamId===b.teamId) continue;
-          // Ray cast: horizontal ray from b's head, count crossings with a's body segments
-          const bHead=b.segments[0];
-          let crossings=0;
-          const segs=a.segments;
-          for(let k=0;k<segs.length-1;k++){
-            const s1=segs[k],s2=segs[k+1];
-            if((s1.y>bHead.y)!==(s2.y>bHead.y)){
-              const xInt=s1.x+(bHead.y-s1.y)/(s2.y-s1.y)*(s2.x-s1.x);
-              if(bHead.x<xInt) crossings++;
-            }
-          }
-          if(crossings%2===1){
-            this.killSnake(b.id,a.id);
-            a.score+=Math.floor(b.segments.length/2+b.score/4);
-          }
-        }
-      }
-    }
+    // Self-coil trap removed — ray-casting through discrete body dots
+    // (spaced 24px apart) caused too many false positives, killing
+    // players who were just passing near a long snake.
   }
 
   // --- Bot AI (unchanged) ---
