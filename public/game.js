@@ -28,6 +28,16 @@
   const playerCountEl = document.getElementById('playerCount');
   const minimapCanvas = document.getElementById('minimap');
   const minimapCtx = minimapCanvas.getContext('2d');
+  const teamScreen = document.getElementById('teamScreen');
+  const teamGrid = document.getElementById('teamGrid');
+  const teamBackBtn = document.getElementById('teamBackBtn');
+  const createRoomBtn = document.getElementById('createRoomBtn');
+  const createRoomScreen = document.getElementById('createRoomScreen');
+  const createRoomBackBtn = document.getElementById('createRoomBackBtn');
+  const createRoomSubmit = document.getElementById('createRoomSubmit');
+  const roomNameInput = document.getElementById('roomNameInput');
+  const roomModeSelect = document.getElementById('roomModeSelect');
+  const roomTeamSizeSelect = document.getElementById('roomTeamSizeSelect');
 
   // --- Config ---
   const MAP_SIZE = 9000;
@@ -157,15 +167,38 @@
   });
 
   multiplayerBtn.addEventListener('click', () => {
-    startScreen.style.display='none';
-    roomScreen.style.display='flex';
+    hideAllScreens(); roomScreen.style.display='flex';
     fetchRooms();
     roomPollInterval = setInterval(fetchRooms, 3000);
   });
   roomBackBtn.addEventListener('click', () => {
-    roomScreen.style.display='none';
-    startScreen.style.display='flex';
+    hideAllScreens(); startScreen.style.display='flex';
     if (roomPollInterval) { clearInterval(roomPollInterval); roomPollInterval=null; }
+  });
+  teamBackBtn.addEventListener('click', () => { hideAllScreens(); roomScreen.style.display='flex'; fetchRooms(); roomPollInterval=setInterval(fetchRooms,3000); });
+
+  // Create room flow
+  createRoomBtn.addEventListener('click', () => { hideAllScreens(); createRoomScreen.style.display='flex'; });
+  createRoomBackBtn.addEventListener('click', () => { hideAllScreens(); roomScreen.style.display='flex'; fetchRooms(); roomPollInterval=setInterval(fetchRooms,3000); });
+  roomModeSelect.addEventListener('change', () => {
+    roomTeamSizeSelect.style.display = roomModeSelect.value==='team' ? 'block' : 'none';
+  });
+  createRoomSubmit.addEventListener('click', async () => {
+    const rName = roomNameInput.value.trim() || 'Custom Room';
+    const mode = roomModeSelect.value;
+    const teamSize = parseInt(roomTeamSizeSelect.value) || 2;
+    try {
+      const res = await fetch('/api/rooms', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ name: rName, mode, teamSize, creatorName: nameInput.value.trim() }),
+      });
+      const data = await res.json();
+      if (data.id) {
+        hideAllScreens();
+        if (mode==='team') showTeamSelector(data.id);
+        else startMultiplayerGame(data.id);
+      }
+    } catch(e) { console.error('Create room failed:', e); }
   });
 
   // --- PLAY VS AI ---
@@ -197,11 +230,16 @@
       for (const room of rooms) {
         const card = document.createElement('div');
         card.className = 'room-card' + (room.players >= room.maxPlayers ? ' full' : '');
-        card.innerHTML = `<span class="room-name">${room.name}</span><span class="room-players">${room.players}/${room.maxPlayers}</span>`;
+        const modeBadge = room.mode==='team'
+          ? `<span class="mode-badge team">TEAM ${room.teamSize}v${room.teamSize}</span>`
+          : `<span class="mode-badge solo">SOLO</span>`;
+        const customBadge = room.isCustom ? '<span class="mode-badge custom">CUSTOM</span>' : '';
+        card.innerHTML = `<div class="room-left">${modeBadge}${customBadge}<span class="room-name">${room.name}</span></div><span class="room-players">${room.players}/${room.maxPlayers}</span>`;
         if (room.players < room.maxPlayers) {
           card.addEventListener('click', () => {
             if (roomPollInterval) { clearInterval(roomPollInterval); roomPollInterval=null; }
-            startMultiplayerGame(room.id);
+            if (room.mode==='team') showTeamSelector(room.id, room.teams);
+            else startMultiplayerGame(room.id);
           });
         }
         roomList.appendChild(card);
@@ -211,23 +249,57 @@
     }
   }
 
-  function startMultiplayerGame(roomId) {
+  let pendingRoomId = null;
+  let selectedTeamId = -1;
+
+  function showTeamSelector(roomId, teams) {
+    pendingRoomId = roomId;
+    hideAllScreens();
+    teamScreen.style.display = 'flex';
+    teamGrid.innerHTML = '';
+    // If we have team data, show it. Otherwise fetch fresh.
+    if (teams) renderTeams(teams);
+    else fetch('/api/rooms').then(r=>r.json()).then(rooms=>{
+      const room = rooms.find(r=>r.id===roomId);
+      if (room && room.teams) renderTeams(room.teams);
+    });
+  }
+
+  function renderTeams(teams) {
+    teamGrid.innerHTML = '';
+    for (const team of teams) {
+      const card = document.createElement('div');
+      card.className = 'team-card';
+      card.innerHTML = `<div class="team-color" style="background:${team.color};box-shadow:0 0 10px ${team.color}"></div>
+        <div class="team-name">${team.name}</div>
+        <div class="team-count">${team.members} players</div>`;
+      card.addEventListener('click', () => {
+        selectedTeamId = team.id;
+        startMultiplayerGame(pendingRoomId, team.id);
+      });
+      teamGrid.appendChild(card);
+    }
+  }
+
+  function startMultiplayerGame(roomId, teamId) {
     gameMode = 'multiplayer';
     currentRoomId = roomId;
+    selectedTeamId = teamId ?? -1;
     const name = nameInput.value.trim() || 'Player';
-    connect(name, roomId);
+    connect(name, roomId, selectedTeamId);
     hideAllScreens(); hud.style.display='block'; document.body.style.cursor='crosshair'; running=true;
   }
 
   function hideAllScreens() {
     startScreen.style.display='none'; skinScreen.style.display='none';
     roomScreen.style.display='none'; deathScreen.style.display='none';
+    teamScreen.style.display='none'; createRoomScreen.style.display='none';
   }
 
   // =====================================================
   // WebSocket (multiplayer mode only)
   // =====================================================
-  function connect(name, roomId) {
+  function connect(name, roomId, teamId) {
     if (ws) ws.close();
     const proto = location.protocol==='https:'?'wss':'ws';
     ws = new WebSocket(`${proto}://${location.host}?room=${encodeURIComponent(roomId)}`);
@@ -235,8 +307,12 @@
 
     ws.onopen = () => {
       const nameBytes = new TextEncoder().encode(name.substring(0,16));
-      const buf = new Uint8Array(2+nameBytes.length);
-      buf[0]=0x03; buf[1]=selectedSkin; buf.set(nameBytes,2);
+      // [0x03][skinIdx][teamId if team mode][name...]
+      const hasTeam = teamId !== undefined && teamId >= 0;
+      const buf = new Uint8Array((hasTeam ? 3 : 2) + nameBytes.length);
+      buf[0]=0x03; buf[1]=selectedSkin;
+      if (hasTeam) { buf[2]=teamId; buf.set(nameBytes,3); }
+      else buf.set(nameBytes,2);
       ws.send(buf);
     };
     ws.onmessage = (event) => {
@@ -266,13 +342,14 @@
       const skin=buf.getUint8(off); off+=1;
       const isBoosting=buf.getUint8(off)===1; off+=1;
       const isBot=buf.getUint8(off)===1; off+=1;
+      const teamId=buf.getInt8(off); off+=1;
       const score=buf.getUint16(off,true); off+=2;
       const nameLen=buf.getUint8(off); off+=1;
       const name=new TextDecoder().decode(new Uint8Array(buf.buffer,off,nameLen)); off+=nameLen;
       const segCount=buf.getUint16(off,true); off+=2;
       const segments=[];
       for (let j=0;j<segCount;j++) { segments.push({x:buf.getInt16(off,true),y:buf.getInt16(off+2,true)}); off+=4; }
-      newSnakes.push({id,skin,boosting:isBoosting,isBot,score,name,segments,alive:true});
+      newSnakes.push({id,skin,boosting:isBoosting,isBot,teamId,score,name,segments,alive:true});
     }
     const foodCount=buf.getUint16(off,true); off+=2;
     const newFood=[];
@@ -303,12 +380,14 @@
       const id=buf.getUint16(off,true); off+=2;
       const score=buf.getUint16(off,true); off+=2;
       const isBot=buf.getUint8(off)===1; off+=1;
+      const teamId=buf.getInt8(off); off+=1;
       const nameLen=buf.getUint8(off); off+=1;
       const name=new TextDecoder().decode(new Uint8Array(buf.buffer,off,nameLen)); off+=nameLen;
       const div=document.createElement('div');
-      div.className='entry'+(id===myId?' me':'');
-      const badge = (isBot&&gameMode==='multiplayer') ? '<span class="ai-badge">AI</span>' : '';
-      div.innerHTML=`<span>${name}${badge}</span><span>${score}</span>`;
+      const isMe = id===myId || (teamId>=0 && teamId===selectedTeamId);
+      div.className='entry'+(isMe?' me':'');
+      const aiBadge = (isBot&&gameMode==='multiplayer') ? '<span class="ai-badge">AI</span>' : '';
+      div.innerHTML=`<span>${name}${aiBadge}</span><span>${score}</span>`;
       leaderboardEntries.appendChild(div);
     }
     playerCountEl.textContent=`Players: ${snakes.length}`;
