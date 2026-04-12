@@ -346,9 +346,9 @@
     return skin.colors[segIndex % skin.colors.length];
   }
 
-  // --- Snake thickness scales with score (1.0 -> ~1.7) ---
+  // --- Snake thickness scales with score (1.0 -> ~3.5) ---
   function getThickness(snake) {
-    return 1 + Math.min(snake.score / 250, 0.7);
+    return 1 + Math.min(snake.score / 80, 2.5);
   }
 
   // --- Zoned random position: weighted toward map center ---
@@ -605,8 +605,8 @@
       });
     }
 
-    // Length scales with score
-    const targetLength = INITIAL_LENGTH + Math.floor(snake.score / 2);
+    // Length grows slowly — thickness is the main growth indicator
+    const targetLength = INITIAL_LENGTH + Math.floor(snake.score / 6);
     while (snake.segments.length > targetLength) snake.segments.pop();
 
     // Boost cost — drains score and drops a small food orb
@@ -1136,7 +1136,7 @@
     // Dynamic zoom — shrink as player grows
     const me = snakes.find(s => s.id === myId);
     const targetZoom = me && me.alive
-      ? Math.max(0.45, BASE_ZOOM - Math.min(me.score / 600, 0.27))
+      ? Math.max(0.35, BASE_ZOOM - Math.min(me.score / 300, 0.37))
       : BASE_ZOOM;
     zoom += (targetZoom - zoom) * 0.05;
 
