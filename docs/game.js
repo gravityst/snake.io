@@ -1179,4 +1179,107 @@
   }
 
   requestAnimationFrame(frame);
+
+  // =====================================================
+  // Menu background — animated snakes behind the start screen
+  // =====================================================
+  const menuBg = document.getElementById('menuBg');
+  const mbCtx = menuBg.getContext('2d');
+  const bgSnakes = [];
+
+  function initMenuBg() {
+    menuBg.width = window.innerWidth;
+    menuBg.height = window.innerHeight;
+    bgSnakes.length = 0;
+    for (let i = 0; i < 8; i++) {
+      const segs = [];
+      const x = Math.random() * menuBg.width;
+      const y = Math.random() * menuBg.height;
+      const a = Math.random() * Math.PI * 2;
+      for (let j = 0; j < 15; j++) {
+        segs.push({ x: x - Math.cos(a) * j * 14, y: y - Math.sin(a) * j * 14 });
+      }
+      bgSnakes.push({
+        segs, angle: a, speed: 40 + Math.random() * 30,
+        turnRate: 0.5 + Math.random() * 1.5, turnTimer: 0,
+        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+        skin: Math.floor(Math.random() * SKINS.length),
+      });
+    }
+  }
+  initMenuBg();
+  window.addEventListener('resize', () => { menuBg.width = window.innerWidth; menuBg.height = window.innerHeight; });
+
+  let menuAnimTime = 0;
+  function animateMenuBg(now) {
+    requestAnimationFrame(animateMenuBg);
+    const dt = 0.016;
+    menuAnimTime += dt;
+
+    // Only show when a menu screen is visible
+    const showBg = startScreen.style.display === 'flex' || skinScreen.style.display === 'flex'
+      || roomScreen.style.display === 'flex' || deathScreen.style.display === 'flex'
+      || teamScreen.style.display === 'flex' || createRoomScreen.style.display === 'flex';
+    menuBg.style.display = showBg ? 'block' : 'none';
+    if (!showBg) return;
+
+    mbCtx.clearRect(0, 0, menuBg.width, menuBg.height);
+    mbCtx.fillStyle = '#0a0a1a';
+    mbCtx.fillRect(0, 0, menuBg.width, menuBg.height);
+
+    // Draw subtle grid
+    mbCtx.strokeStyle = 'rgba(0,255,255,0.025)';
+    mbCtx.lineWidth = 1;
+    mbCtx.beginPath();
+    for (let x = 0; x < menuBg.width; x += 50) { mbCtx.moveTo(x, 0); mbCtx.lineTo(x, menuBg.height); }
+    for (let y = 0; y < menuBg.height; y += 50) { mbCtx.moveTo(0, y); mbCtx.lineTo(menuBg.width, y); }
+    mbCtx.stroke();
+
+    // Animate background snakes
+    for (const bs of bgSnakes) {
+      bs.turnTimer -= dt;
+      if (bs.turnTimer <= 0) {
+        bs.turnTimer = 1 + Math.random() * 2;
+        bs.targetAngle = bs.angle + (Math.random() - 0.5) * 2;
+      }
+      let ad = (bs.targetAngle || bs.angle) - bs.angle;
+      while (ad > Math.PI) ad -= Math.PI * 2;
+      while (ad < -Math.PI) ad += Math.PI * 2;
+      bs.angle += Math.sign(ad) * Math.min(Math.abs(ad), bs.turnRate * dt);
+
+      const head = bs.segs[0];
+      head.x += Math.cos(bs.angle) * bs.speed * dt;
+      head.y += Math.sin(bs.angle) * bs.speed * dt;
+      // Wrap around screen
+      if (head.x < -50) head.x = menuBg.width + 50;
+      if (head.x > menuBg.width + 50) head.x = -50;
+      if (head.y < -50) head.y = menuBg.height + 50;
+      if (head.y > menuBg.height + 50) head.y = -50;
+
+      // Trail body
+      for (let i = 1; i < bs.segs.length; i++) {
+        const prev = bs.segs[i - 1], cur = bs.segs[i];
+        const dx = prev.x - cur.x, dy = prev.y - cur.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d > 14) { const t = 14 / d; cur.x = prev.x - dx * t; cur.y = prev.y - dy * t; }
+      }
+
+      // Draw body
+      const skin = SKINS[bs.skin] || SKINS[0];
+      for (let i = bs.segs.length - 1; i >= 1; i--) {
+        const s = bs.segs[i];
+        const tailT = i / bs.segs.length;
+        const r = 5 * (1 - tailT * 0.3);
+        mbCtx.fillStyle = skin.colors[i % skin.colors.length];
+        mbCtx.globalAlpha = 0.25;
+        mbCtx.beginPath(); mbCtx.arc(s.x, s.y, r, 0, Math.PI * 2); mbCtx.fill();
+      }
+      // Head
+      mbCtx.fillStyle = skin.colors[0];
+      mbCtx.globalAlpha = 0.35;
+      mbCtx.beginPath(); mbCtx.arc(head.x, head.y, 7, 0, Math.PI * 2); mbCtx.fill();
+      mbCtx.globalAlpha = 1;
+    }
+  }
+  requestAnimationFrame(animateMenuBg);
 })();

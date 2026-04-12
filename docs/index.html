@@ -18,52 +18,30 @@
       top: 0; left: 0;
     }
 
-    /* Glass button base */
+    /* Flat outline button */
     .glass-btn {
       padding: 14px 40px;
       font-size: 20px;
       font-weight: bold;
-      border: 1.5px solid rgba(0, 255, 255, 0.5);
+      border: 1.5px solid rgba(0, 255, 255, 0.45);
       border-radius: 30px;
-      background: linear-gradient(
-        135deg,
-        rgba(0, 255, 255, 0.08) 0%,
-        rgba(0, 136, 255, 0.12) 50%,
-        rgba(0, 255, 255, 0.06) 100%
-      );
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      color: #fff;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.9);
       cursor: pointer;
       letter-spacing: 2px;
-      transition: transform 0.2s, border-color 0.3s, box-shadow 0.3s, background 0.3s;
-      text-shadow: 0 0 8px rgba(0, 255, 255, 0.4);
-      position: relative;
-      overflow: hidden;
-    }
-    .glass-btn::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 50%;
-      background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 100%);
-      border-radius: 30px 30px 0 0;
-      pointer-events: none;
+      transition: transform 0.15s, border-color 0.2s, box-shadow 0.2s, color 0.2s;
     }
     .glass-btn:hover {
-      transform: scale(1.05);
-      border-color: rgba(0, 255, 255, 0.8);
-      box-shadow: 0 0 25px rgba(0, 255, 255, 0.25), inset 0 0 20px rgba(0, 255, 255, 0.06);
-      background: linear-gradient(
-        135deg,
-        rgba(0, 255, 255, 0.14) 0%,
-        rgba(0, 136, 255, 0.18) 50%,
-        rgba(0, 255, 255, 0.10) 100%
-      );
+      transform: scale(1.04);
+      border-color: #0ff;
+      color: #fff;
+      box-shadow: 0 0 20px rgba(0, 255, 255, 0.15);
     }
-    .glass-btn:active {
-      transform: scale(0.97);
-    }
+    .glass-btn:active { transform: scale(0.97); }
+    .glass-btn.accent-orange { border-color: rgba(255, 136, 0, 0.5); color: rgba(255,180,100,0.9); }
+    .glass-btn.accent-orange:hover { border-color: #f80; color: #fff; box-shadow: 0 0 20px rgba(255,136,0,0.15); }
+    .glass-btn.accent-pink { border-color: rgba(255, 0, 255, 0.4); color: rgba(255,150,255,0.9); }
+    .glass-btn.accent-pink:hover { border-color: #f0f; color: #fff; box-shadow: 0 0 20px rgba(255,0,255,0.15); }
 
     /* Start screen */
     #startScreen {
@@ -74,42 +52,54 @@
       align-items: center;
       justify-content: center;
       z-index: 100;
-      background: radial-gradient(ellipse at center, #0d1b2a 0%, #0a0a1a 70%);
+      background: transparent; /* bg canvas shows through */
     }
     #startScreen h1 {
       font-size: 72px;
       color: #fff;
       text-shadow: 0 0 20px #0ff, 0 0 40px #0ff, 0 0 80px #08f;
-      margin-bottom: 40px;
-      letter-spacing: 4px;
+      margin-bottom: 10px;
+      letter-spacing: 6px;
+      animation: titlePulse 3s ease-in-out infinite;
+    }
+    @keyframes titlePulse {
+      0%, 100% { text-shadow: 0 0 20px #0ff, 0 0 40px #0ff, 0 0 80px #08f; }
+      50% { text-shadow: 0 0 30px #0ff, 0 0 60px #0ff, 0 0 120px #08f, 0 0 160px #04d; }
+    }
+    #startScreen .tagline {
+      color: rgba(255,255,255,0.35);
+      font-size: 14px;
+      letter-spacing: 3px;
+      margin-bottom: 32px;
+      text-transform: uppercase;
     }
     #startScreen input {
-      width: 300px;
+      width: 320px;
       padding: 14px 20px;
-      font-size: 20px;
-      border: 1.5px solid rgba(0, 255, 255, 0.3);
+      font-size: 18px;
+      border: 1.5px solid rgba(0, 255, 255, 0.25);
       border-radius: 30px;
-      background: rgba(0, 20, 40, 0.5);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
+      background: rgba(0, 10, 20, 0.6);
       color: #fff;
       text-align: center;
       outline: none;
-      margin-bottom: 20px;
+      margin-bottom: 18px;
       transition: border-color 0.3s, box-shadow 0.3s;
     }
     #startScreen input:focus {
       border-color: #0ff;
-      box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+      box-shadow: 0 0 15px rgba(0, 255, 255, 0.15);
     }
-    #startScreen .glass-btn {
-      width: 300px;
-      font-size: 22px;
-    }
+    #startScreen .glass-btn { width: 320px; font-size: 20px; }
     #startScreen .subtitle {
-      color: rgba(255,255,255,0.4);
-      margin-top: 20px;
-      font-size: 14px;
+      color: rgba(255,255,255,0.3);
+      margin-top: 24px;
+      font-size: 13px;
+      letter-spacing: 1px;
+    }
+    #onlineCount {
+      font-size: 11px; color: #0ff; opacity: 0.7;
+      margin-top: 2px;
     }
 
     /* Skin picker screen */
@@ -155,15 +145,6 @@
       transition: transform 0.2s, border-color 0.3s, box-shadow 0.3s;
       position: relative;
       overflow: hidden;
-    }
-    .skin-card::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 45%;
-      background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, transparent 100%);
-      border-radius: 16px 16px 0 0;
-      pointer-events: none;
     }
     .skin-card:hover {
       transform: scale(1.08);
@@ -313,11 +294,6 @@
       cursor: pointer; transition: transform 0.2s, border-color 0.3s, box-shadow 0.3s;
       position: relative; overflow: hidden;
     }
-    .room-card::before {
-      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 45%;
-      background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, transparent 100%);
-      border-radius: 16px 16px 0 0; pointer-events: none;
-    }
     .room-card:hover { transform: scale(1.03); border-color: rgba(0,255,255,0.5); box-shadow: 0 0 20px rgba(0,255,255,0.12); }
     .room-card.full { opacity: 0.4; cursor: not-allowed; }
     .room-card .room-name { color: #fff; font-size: 16px; font-weight: bold; letter-spacing: 1px; }
@@ -400,18 +376,20 @@
     <div style="color:rgba(255,255,255,0.3);font-size:12px;margin-top:12px;">Waking up server...</div>
   </div>
 
+  <!-- Animated background canvas for menu -->
+  <canvas id="menuBg" style="position:fixed;top:0;left:0;z-index:99;pointer-events:none;"></canvas>
+
   <div id="startScreen">
     <h1>SNAKE.IO</h1>
+    <p class="tagline">Eat. Grow. Dominate.</p>
     <input type="text" id="nameInput" placeholder="Enter your name" maxlength="16" autofocus>
-    <div class="btn-row">
-      <button class="glass-btn" id="playAIBtn">PLAY VS AI</button>
-      <button class="glass-btn multiplayer-btn" id="multiplayerBtn">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z"/></svg>
-        MULTIPLAYER
-      </button>
-    </div>
-    <button class="glass-btn" id="skinsBtn" style="width:372px; font-size:18px; border-color: rgba(255,0,255,0.4); background: linear-gradient(135deg, rgba(255,0,255,0.08), rgba(0,136,255,0.10), rgba(255,0,255,0.06));">SKINS</button>
-    <p class="subtitle">Use mouse to steer — Click or Space to boost</p>
+    <button class="glass-btn" id="playAIBtn" style="margin-bottom:10px;">PLAY VS AI</button>
+    <button class="glass-btn" id="multiplayerBtn" style="margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:8px;">
+      <svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:#0ff;fill:none;stroke-width:1.5;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z"/></svg>
+      MULTIPLAYER
+    </button>
+    <button class="glass-btn accent-pink" id="skinsBtn" style="width:320px;font-size:17px;">SKINS & ACCESSORIES</button>
+    <p class="subtitle">Mouse to steer &middot; Click or Space to boost</p>
   </div>
 
   <div id="roomScreen">
@@ -459,7 +437,7 @@
     <h2>YOU DIED</h2>
     <p class="score">Score: <span id="finalScore">0</span></p>
     <button class="glass-btn" id="respawnBtn" style="margin-bottom:10px;">PLAY AGAIN</button>
-    <button class="glass-btn skin-back-btn" id="mainMenuBtn">MAIN MENU</button>
+    <button class="glass-btn accent-orange" id="mainMenuBtn" style="padding:10px 30px;font-size:16px;">MAIN MENU</button>
   </div>
 
   <div id="hud">
