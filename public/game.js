@@ -1,5 +1,6 @@
 // ============================================================
-// Snake.io — Fully client-side game with AI bots + skins
+// Snake.io — Multiplayer client (renderer + networking)
+// Server runs all physics/AI/collisions. Client just renders.
 // ============================================================
 
 (() => {
@@ -25,36 +26,15 @@
   const minimapCanvas = document.getElementById('minimap');
   const minimapCtx = minimapCanvas.getContext('2d');
 
-  // --- Config ---
-  const MAP_SIZE = 9000;           // large but playable
-  const FOOD_COUNT = 1000;
-  const SNAKE_SPEED = 200;
-  const BOOST_SPEED = 380;
-  const SEGMENT_SPACING = 24;
+  // --- Config (display only, game logic is on server) ---
+  const MAP_SIZE = 9000;
   const DOT_RADIUS = 9;
-  const INITIAL_LENGTH = 10;
   const HEAD_RADIUS = 14;
-  const BOOST_SHRINK_RATE = 2.5;
-  const BOT_COUNT = 25;
-  const MEGA_ORB_COUNT = 12;
-  const BASE_ZOOM = 0.72;          // camera zoom (smaller = sees more)
-  const MAX_ADVANCED_BOTS = 2;     // hard cap on rare advanced AI
-  // Bot skill tiers
-  const SKILL_BEGINNER = 0;
-  const SKILL_AMATEUR = 1;
-  const SKILL_ADVANCED = 2;
+  const BASE_ZOOM = 0.72;
   const COLORS = ['#0ff', '#f0f', '#0f0', '#ff0', '#f80', '#08f', '#f44', '#8f0'];
-  const BOT_NAMES = [
-    'Viper', 'Shadow', 'Blaze', 'Neon', 'Ghost', 'Toxic', 'Pixel', 'Glitch',
-    'Storm', 'Bolt', 'Ember', 'Frost', 'Nova', 'Pulse', 'Drift', 'Surge',
-    'Zenith', 'Razor', 'Flux', 'Echo', 'Orbit', 'Prism', 'Hex', 'Chrome'
-  ];
 
-  // --- Skins ---
-  // Each skin has a name and a colors array.
-  // Single-color = solid skin, multi-color = dots cycle through the palette.
+  // --- Skins (must match server's SKINS_COUNT) ---
   const SKINS = [
-    // --- Solid colors ---
     { name: 'Cyan',       colors: ['#0ff'] },
     { name: 'Magenta',    colors: ['#f0f'] },
     { name: 'Lime',       colors: ['#0f0'] },
@@ -68,7 +48,6 @@
     { name: 'Crimson',    colors: ['#c12'] },
     { name: 'Teal',       colors: ['#0a8'] },
     { name: 'Amber',      colors: ['#fa3'] },
-    // --- Two-tone stripes ---
     { name: 'Bumblebee',  colors: ['#ff0', '#222'] },
     { name: 'Zebra',      colors: ['#fff', '#111'] },
     { name: 'Coralreef',  colors: ['#f44', '#fff'] },
@@ -76,7 +55,6 @@
     { name: 'Mintchip',   colors: ['#5fc', '#222'] },
     { name: 'Bubblegum',  colors: ['#f6c', '#fff'] },
     { name: 'Twilight',   colors: ['#a0f', '#08f'] },
-    // --- Three+ color gradients ---
     { name: 'Sunset',     colors: ['#f80', '#f44', '#ff0'] },
     { name: 'Ocean',      colors: ['#0ff', '#08f', '#04d'] },
     { name: 'Toxic',      colors: ['#0f0', '#ff0', '#0f0'] },
@@ -96,7 +74,6 @@
     { name: 'Dragon',     colors: ['#f44', '#ff0', '#0a4', '#08f'] },
     { name: 'Plasma',     colors: ['#f0f', '#a0f', '#08f', '#0ff'] },
     { name: 'Pumpkin',    colors: ['#f80', '#222', '#f80', '#222'] },
-    // --- Long full-spectrum ---
     { name: 'Neon Party', colors: ['#f0f', '#0ff', '#ff0', '#0f0'] },
     { name: 'Rainbow',    colors: ['#f44', '#f80', '#ff0', '#0f0', '#08f', '#a0f'] },
     { name: 'Pastel',     colors: ['#fbb', '#fdb', '#ffb', '#bfb', '#bdf', '#fbf'] },
@@ -111,11 +88,8 @@
     SKINS.forEach((skin, idx) => {
       const card = document.createElement('div');
       card.className = 'skin-card' + (idx === selectedSkin ? ' selected' : '');
-      card.dataset.idx = idx;
-
       const dotsDiv = document.createElement('div');
       dotsDiv.className = 'skin-dots';
-      // Show up to 6 preview dots
       const previewCount = Math.min(skin.colors.length >= 2 ? 5 : 3, 6);
       for (let i = 0; i < previewCount; i++) {
         const dot = document.createElement('div');
@@ -123,32 +97,26 @@
         const c = skin.colors[i % skin.colors.length];
         dot.style.background = c;
         dot.style.boxShadow = `0 0 6px ${c}`;
-        // Taper size for body feel
         const size = i === 0 ? 16 : 14 - i;
         dot.style.width = size + 'px';
         dot.style.height = size + 'px';
         dotsDiv.appendChild(dot);
       }
-
       const nameDiv = document.createElement('div');
       nameDiv.className = 'skin-name';
       nameDiv.textContent = skin.name;
-
       card.appendChild(dotsDiv);
       card.appendChild(nameDiv);
-
       card.addEventListener('click', () => {
         selectedSkin = idx;
         document.querySelectorAll('.skin-card').forEach(c => c.classList.remove('selected'));
         card.classList.add('selected');
       });
-
       skinGrid.appendChild(card);
     });
   }
   buildSkinGrid();
 
-  // --- Skin screen nav ---
   skinsBtn.addEventListener('click', () => {
     startScreen.style.display = 'none';
     skinScreen.style.display = 'flex';
@@ -158,13 +126,28 @@
     startScreen.style.display = 'flex';
   });
 
-  // --- Game state ---
-  let snakes = [];
-  let food = [];
-  let megaOrbs = [];
+  // --- Helpers ---
+  function hexFull(c) {
+    if (c.length === 4) return '#' + c[1]+c[1] + c[2]+c[2] + c[3]+c[3];
+    return c;
+  }
+
+  function getSegColor(snake, segIndex) {
+    const skin = SKINS[snake.skin] || SKINS[0];
+    return skin.colors[segIndex % skin.colors.length];
+  }
+
+  function getThickness(snake) {
+    return 1 + Math.min(snake.score / 80, 2.5);
+  }
+
+  // --- Game state (populated by server) ---
+  let snakes = [];       // [{id, skin, boosting, score, name, segments:[{x,y},...]}]
+  let food = [];         // [{x, y, color, radius, tier}]
+  let megaOrbs = [];     // [{x, y, color, radius, value}]
   let particles = [];
   let myId = null;
-  let nextId = 1;
+  let ws = null;
   let running = false;
   let camera = { x: 0, y: 0 };
   let mouseX = 0, mouseY = 0;
@@ -172,7 +155,8 @@
   let screenShake = 0;
   let lastFrame = 0;
   let animTime = 0;
-  let zoom = BASE_ZOOM;            // dynamic, shrinks as player grows
+  let zoom = BASE_ZOOM;
+  let lastScore = 0;
 
   // --- Resize ---
   function resize() {
@@ -184,10 +168,10 @@
 
   // --- Input ---
   canvas.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
-  canvas.addEventListener('mousedown', () => { boosting = true; });
-  canvas.addEventListener('mouseup', () => { boosting = false; });
-  window.addEventListener('keydown', (e) => { if (e.code === 'Space') { e.preventDefault(); boosting = true; } });
-  window.addEventListener('keyup', (e) => { if (e.code === 'Space') boosting = false; });
+  canvas.addEventListener('mousedown', () => { setBoosting(true); });
+  canvas.addEventListener('mouseup', () => { setBoosting(false); });
+  window.addEventListener('keydown', (e) => { if (e.code === 'Space') { e.preventDefault(); setBoosting(true); } });
+  window.addEventListener('keyup', (e) => { if (e.code === 'Space') setBoosting(false); });
 
   canvas.addEventListener('touchmove', (e) => {
     e.preventDefault();
@@ -198,18 +182,27 @@
     e.preventDefault();
     mouseX = e.touches[0].clientX;
     mouseY = e.touches[0].clientY;
-    if (e.touches.length >= 2) boosting = true;
+    if (e.touches.length >= 2) setBoosting(true);
   }, { passive: false });
-  canvas.addEventListener('touchend', (e) => { if (e.touches.length < 2) boosting = false; });
+  canvas.addEventListener('touchend', (e) => { if (e.touches.length < 2) setBoosting(false); });
 
-  // --- Play ---
+  function setBoosting(val) {
+    boosting = val;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const buf = new Uint8Array(2);
+    buf[0] = 0x02;
+    buf[1] = val ? 1 : 0;
+    ws.send(buf);
+  }
+
+  // --- Play / Respawn ---
   playBtn.addEventListener('click', startGame);
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') startGame(); });
   respawnBtn.addEventListener('click', startGame);
 
   function startGame() {
     const name = nameInput.value.trim() || 'Player';
-    initGame(name);
+    connect(name);
     startScreen.style.display = 'none';
     skinScreen.style.display = 'none';
     deathScreen.style.display = 'none';
@@ -218,549 +211,177 @@
     running = true;
   }
 
-  // --- Game init ---
-  function initGame(playerName) {
-    snakes = [];
-    food = [];
-    megaOrbs = [];
-    particles = [];
-    nextId = 1;
+  // =====================================================
+  // WebSocket connection + binary protocol
+  // =====================================================
+  function connect(name) {
+    if (ws) ws.close();
 
-    // Spawn player with selected skin
-    const player = createSnake(playerName, false, selectedSkin, SKILL_BEGINNER);
-    myId = player.id;
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}`);
+    ws.binaryType = 'arraybuffer';
 
-    // Spawn bots with random skins and skill levels
-    for (let i = 0; i < BOT_COUNT; i++) {
-      const skill = randomBotSkill();
-      createSnake(BOT_NAMES[i % BOT_NAMES.length], true, Math.floor(Math.random() * SKINS.length), skill);
-    }
+    ws.onopen = () => {
+      // Send join: [0x03][skinIdx][name...]
+      const nameBytes = new TextEncoder().encode(name.substring(0, 16));
+      const buf = new Uint8Array(2 + nameBytes.length);
+      buf[0] = 0x03;
+      buf[1] = selectedSkin;
+      buf.set(nameBytes, 2);
+      ws.send(buf);
+    };
 
-    // Spawn food
-    for (let i = 0; i < FOOD_COUNT; i++) food.push(createFood());
+    ws.onmessage = (event) => {
+      const buf = new DataView(event.data);
+      if (buf.byteLength < 1) return;
+      const type = buf.getUint8(0);
 
-    // Spawn mega orbs
-    for (let i = 0; i < MEGA_ORB_COUNT; i++) megaOrbs.push(createMegaOrb());
+      if (type === 0x02) {
+        // Welcome: [0x02][yourId u16]
+        myId = buf.getUint16(1, true);
+      } else if (type === 0x01) {
+        // State update
+        parseState(buf);
+      } else if (type === 0x03) {
+        // Death: [0x03][deadId u16]
+        const deadId = buf.getUint16(1, true);
+        if (deadId === myId) onDeath();
+      } else if (type === 0x04) {
+        // Kill event: [0x04][killerId u16][killedId u16]
+        const killedId = buf.getUint16(3, true);
+        const killed = snakes.find(s => s.id === killedId);
+        if (killed && killed.segments.length > 0) {
+          spawnDeathParticles(killed.segments[0].x, killed.segments[0].y, killed.skin);
+          if (killedId === myId) screenShake = 15;
+        }
+      } else if (type === 0x05) {
+        // Leaderboard
+        parseLeaderboard(buf);
+      }
+    };
 
-    camera.x = player.segments[0].x;
-    camera.y = player.segments[0].y;
+    ws.onclose = () => {
+      // Auto-reconnect after 2s if still in game
+      if (running) {
+        setTimeout(() => connect(name), 2000);
+      }
+    };
   }
 
-  function createSnake(name, isBot, skinIdx, skill) {
-    const id = nextId++;
-    const angle = Math.random() * Math.PI * 2;
-    // Both bots and player cluster toward center; bots slightly wider spread
-    const pos = isBot ? randomZonedPosition(1.2) : randomZonedPosition(2.5);
-    const x = pos.x, y = pos.y;
-    const segments = [];
-    for (let i = 0; i < INITIAL_LENGTH; i++) {
-      segments.push({
-        x: x - Math.cos(angle) * i * SEGMENT_SPACING,
-        y: y - Math.sin(angle) * i * SEGMENT_SPACING,
-      });
+  // --- Parse binary state from server ---
+  function parseState(buf) {
+    let off = 1;
+
+    // Snakes
+    const snakeCount = buf.getUint16(off, true); off += 2;
+    const newSnakes = [];
+    for (let i = 0; i < snakeCount; i++) {
+      const id = buf.getUint16(off, true); off += 2;
+      const skin = buf.getUint8(off); off += 1;
+      const isBoosting = buf.getUint8(off) === 1; off += 1;
+      const score = buf.getUint16(off, true); off += 2;
+      const nameLen = buf.getUint8(off); off += 1;
+      const nameBytes = new Uint8Array(buf.buffer, off, nameLen);
+      const name = new TextDecoder().decode(nameBytes); off += nameLen;
+      const segCount = buf.getUint16(off, true); off += 2;
+      const segments = [];
+      for (let j = 0; j < segCount; j++) {
+        segments.push({
+          x: buf.getInt16(off, true),
+          y: buf.getInt16(off + 2, true)
+        });
+        off += 4;
+      }
+      newSnakes.push({ id, skin, boosting: isBoosting, score, name, segments, alive: true });
     }
+
+    // Food
+    const foodCount = buf.getUint16(off, true); off += 2;
+    const newFood = [];
+    for (let i = 0; i < foodCount; i++) {
+      newFood.push({
+        x: buf.getInt16(off, true),
+        y: buf.getInt16(off + 2, true),
+        color: buf.getUint8(off + 4),
+        radius: buf.getUint8(off + 5),
+        tier: buf.getUint8(off + 6),
+      });
+      off += 7;
+    }
+
+    // Mega orbs
+    const megaCount = buf.getUint16(off, true); off += 2;
+    const newMega = [];
+    for (let i = 0; i < megaCount; i++) {
+      newMega.push({
+        x: buf.getInt16(off, true),
+        y: buf.getInt16(off + 2, true),
+        color: buf.getUint8(off + 4),
+        radius: buf.getUint8(off + 5),
+        value: buf.getUint8(off + 6),
+      });
+      off += 7;
+    }
+
+    snakes = newSnakes;
+    food = newFood;
+    megaOrbs = newMega;
+
+    // Update camera to follow player
+    const me = snakes.find(s => s.id === myId);
+    if (me && me.segments.length > 0) {
+      camera.x += (me.segments[0].x - camera.x) * 0.15;
+      camera.y += (me.segments[0].y - camera.y) * 0.15;
+      myScoreEl.textContent = `Score: ${me.score}`;
+      lastScore = me.score;
+    }
+  }
+
+  function parseLeaderboard(buf) {
+    let off = 1;
+    const count = buf.getUint8(off); off += 1;
+    leaderboardEntries.innerHTML = '';
+    let playerCount = 0;
+    for (let i = 0; i < count; i++) {
+      const id = buf.getUint16(off, true); off += 2;
+      const score = buf.getUint16(off, true); off += 2;
+      const nameLen = buf.getUint8(off); off += 1;
+      const nameBytes = new Uint8Array(buf.buffer, off, nameLen);
+      const name = new TextDecoder().decode(nameBytes); off += nameLen;
+      const div = document.createElement('div');
+      div.className = 'entry' + (id === myId ? ' me' : '');
+      div.innerHTML = `<span>${name}</span><span>${score}</span>`;
+      leaderboardEntries.appendChild(div);
+      playerCount++;
+    }
+    playerCountEl.textContent = `Players: ${snakes.length}`;
+  }
+
+  function onDeath() {
+    finalScoreEl.textContent = lastScore;
+    deathScreen.style.display = 'flex';
+    document.body.style.cursor = 'default';
+    screenShake = 15;
+    myId = null;
+    running = false;
+  }
+
+  // --- Send direction to server at ~20Hz ---
+  let sendTimer = 0;
+  function sendDirection() {
+    if (!ws || ws.readyState !== WebSocket.OPEN || myId === null) return;
+    const targetAngle = Math.atan2(mouseY - canvas.height / 2, mouseX - canvas.width / 2);
+    const buf = new ArrayBuffer(5);
+    const view = new DataView(buf);
+    view.setUint8(0, 0x01);
+    view.setFloat32(1, targetAngle, true);
+    ws.send(buf);
+  }
+
+  // --- Particles (client-side visual only) ---
+  function spawnDeathParticles(x, y, skinIdx) {
     const skin = SKINS[skinIdx] || SKINS[0];
-    const snake = {
-      id, name, segments, angle,
-      targetAngle: angle,
-      boosting: false,
-      score: 0,
-      skin: skinIdx,
-      color: COLORS.indexOf(skin.colors[0]) >= 0 ? COLORS.indexOf(skin.colors[0]) : 0,
-      alive: true,
-      isBot,
-      skill: skill ?? SKILL_BEGINNER,
-      boostAccum: 0,
-      botTimer: 0,
-      botWanderAngle: angle,
-    };
-    snakes.push(snake);
-    return snake;
-  }
-
-  function createFood() {
-    const r = Math.random();
-    let radius, value, tier;
-    if (r < 0.35) {
-      radius = 3 + Math.random() * 2;
-      value = 1; tier = 0;
-    } else if (r < 0.58) {
-      radius = 5 + Math.random() * 2;
-      value = 2; tier = 1;
-    } else if (r < 0.75) {
-      radius = 7 + Math.random() * 2;
-      value = 3; tier = 2;
-    } else if (r < 0.87) {
-      radius = 9 + Math.random() * 2;
-      value = 5; tier = 3;
-    } else if (r < 0.94) {
-      radius = 11 + Math.random() * 2;
-      value = 8; tier = 4;
-    } else if (r < 0.975) {
-      radius = 13 + Math.random() * 2;
-      value = 12; tier = 5;
-    } else if (r < 0.99) {
-      radius = 15 + Math.random() * 2;
-      value = 18; tier = 6;
-    } else if (r < 0.997) {
-      radius = 18 + Math.random() * 2;
-      value = 26; tier = 7;
-    } else {
-      radius = 21 + Math.random() * 3;
-      value = 35; tier = 8;
-    }
-    // Center has dramatically more food density
-    const pos = randomZonedPosition(1.5);
-    return {
-      x: pos.x, y: pos.y,
-      color: Math.floor(Math.random() * COLORS.length),
-      radius, value, tier,
-    };
-  }
-
-  function createMegaOrb() {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 25 + Math.random() * 25;
-    // Mega orbs concentrated more toward center too
-    const pos = randomZonedPosition(1.3);
-    return {
-      x: pos.x, y: pos.y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      radius: 22 + Math.random() * 8,
-      value: 50 + Math.floor(Math.random() * 31),
-      color: Math.floor(Math.random() * COLORS.length),
-      spin: Math.random() * Math.PI * 2,
-    };
-  }
-
-  // --- Expand short hex (#0ff) to full (#00ffff) so we can append alpha ---
-  function hexFull(c) {
-    if (c.length === 4) return '#' + c[1]+c[1] + c[2]+c[2] + c[3]+c[3];
-    return c;
-  }
-
-  // --- Get color for a specific segment index of a snake ---
-  function getSegColor(snake, segIndex) {
-    const skin = SKINS[snake.skin] || SKINS[0];
-    return skin.colors[segIndex % skin.colors.length];
-  }
-
-  // --- Snake thickness scales with score (1.0 -> ~3.5) ---
-  function getThickness(snake) {
-    return 1 + Math.min(snake.score / 80, 2.5);
-  }
-
-  // --- Zoned random position: weighted toward map center ---
-  // power < 1 = strongly biased toward center, power > 1 = biased toward edges
-  function randomZonedPosition(power = 1.6) {
-    const r = Math.pow(Math.random(), power) * (MAP_SIZE / 2 - 100);
-    const a = Math.random() * Math.PI * 2;
-    return { x: Math.cos(a) * r, y: Math.sin(a) * r };
-  }
-
-  // --- Pick a bot skill, respecting advanced cap ---
-  function randomBotSkill() {
-    const advancedCount = snakes.filter(s => s.isBot && s.alive && s.skill === SKILL_ADVANCED).length;
-    const r = Math.random();
-    if (r < 0.05 && advancedCount < MAX_ADVANCED_BOTS) return SKILL_ADVANCED;
-    if (r < 0.30) return SKILL_AMATEUR;
-    return SKILL_BEGINNER;
-  }
-
-  // --- Bot AI ---
-  function updateBotAI(snake, dt) {
-    if (snake.skill === SKILL_ADVANCED) updateAdvancedAI(snake, dt);
-    else if (snake.skill === SKILL_AMATEUR) updateAmateurAI(snake, dt);
-    else updateBeginnerAI(snake, dt);
-  }
-
-  // BEGINNER — slow reactions, small awareness, no threat avoidance
-  function updateBeginnerAI(snake, dt) {
-    snake.botTimer -= dt;
-    if (snake.botTimer > 0) return;
-    snake.botTimer = 0.7 + Math.random() * 0.8;
-
-    const head = snake.segments[0];
-    const half = MAP_SIZE / 2 - 250;
-
-    if (Math.abs(head.x) > half || Math.abs(head.y) > half) {
-      snake.targetAngle = Math.atan2(-head.y, -head.x);
-      snake.boosting = false;
-      return;
-    }
-
-    // Look for food only nearby, sometimes wander randomly
-    if (Math.random() < 0.25) {
-      snake.botWanderAngle += (Math.random() - 0.5) * 2.5;
-      snake.targetAngle = snake.botWanderAngle;
-      snake.boosting = false;
-      return;
-    }
-
-    let closest = null;
-    let closestDistSq = 250 * 250;
-    for (const f of food) {
-      const dx = f.x - head.x;
-      if (dx > 250 || dx < -250) continue;
-      const dy = f.y - head.y;
-      if (dy > 250 || dy < -250) continue;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < closestDistSq) { closestDistSq = d2; closest = f; }
-    }
-    if (closest) {
-      snake.targetAngle = Math.atan2(closest.y - head.y, closest.x - head.x);
-    } else {
-      snake.botWanderAngle += (Math.random() - 0.5) * 2;
-      snake.targetAngle = snake.botWanderAngle;
-    }
-    snake.boosting = false;
-  }
-
-  // AMATEUR — moderate reactions, basic threat avoidance
-  function updateAmateurAI(snake, dt) {
-    snake.botTimer -= dt;
-    if (snake.botTimer > 0) return;
-    snake.botTimer = 0.3 + Math.random() * 0.4;
-
-    const head = snake.segments[0];
-    const half = MAP_SIZE / 2 - 250;
-
-    if (Math.abs(head.x) > half || Math.abs(head.y) > half) {
-      snake.targetAngle = Math.atan2(-head.y, -head.x);
-      snake.boosting = true;
-      return;
-    }
-
-    let closestFood = null;
-    let closestFoodSq = 450 * 450;
-    for (const f of food) {
-      const dx = f.x - head.x;
-      if (dx > 450 || dx < -450) continue;
-      const dy = f.y - head.y;
-      if (dy > 450 || dy < -450) continue;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < closestFoodSq) { closestFoodSq = d2; closestFood = f; }
-    }
-
-    // Threat avoidance
-    for (const other of snakes) {
-      if (other.id === snake.id || !other.alive) continue;
-      const ohead = other.segments[0];
-      const dx = ohead.x - head.x;
-      const dy = ohead.y - head.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < 180) {
-        snake.targetAngle = Math.atan2(-dy, -dx) + (Math.random() - 0.5) * 0.5;
-        snake.boosting = d < 90;
-        return;
-      }
-    }
-
-    if (closestFood) {
-      snake.targetAngle = Math.atan2(closestFood.y - head.y, closestFood.x - head.x);
-      snake.boosting = false;
-    } else {
-      snake.botWanderAngle += (Math.random() - 0.5) * 1.2;
-      snake.targetAngle = snake.botWanderAngle;
-      snake.boosting = false;
-    }
-  }
-
-  // ADVANCED — fast reactions, hunts smaller snakes, predicts movement, grabs mega orbs
-  function updateAdvancedAI(snake, dt) {
-    snake.botTimer -= dt;
-    if (snake.botTimer > 0) return;
-    snake.botTimer = 0.1;
-
-    const head = snake.segments[0];
-    const half = MAP_SIZE / 2 - 250;
-
-    // Wall avoidance
-    if (Math.abs(head.x) > half || Math.abs(head.y) > half) {
-      snake.targetAngle = Math.atan2(-head.y, -head.x);
-      snake.boosting = false;
-      return;
-    }
-
-    // Threat detection (any snake equal or larger nearby)
-    for (const other of snakes) {
-      if (other.id === snake.id || !other.alive) continue;
-      const ohead = other.segments[0];
-      const dx = ohead.x - head.x;
-      const dy = ohead.y - head.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < 220 && other.score >= snake.score * 0.85) {
-        // Flee perpendicular to incoming threat
-        const perp = Math.atan2(-dy, -dx);
-        snake.targetAngle = perp + (Math.random() < 0.5 ? -0.3 : 0.3);
-        snake.boosting = d < 130 && snake.score > 30;
-        return;
-      }
-    }
-
-    // Hunt for mega orbs first (prioritize predicted position)
-    let bestMega = null;
-    let bestMegaDist = 1500;
-    for (const m of megaOrbs) {
-      const dx = m.x - head.x;
-      const dy = m.y - head.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < bestMegaDist) { bestMegaDist = d; bestMega = m; }
-    }
-    if (bestMega) {
-      const t = bestMegaDist / SNAKE_SPEED;
-      const tx = bestMega.x + bestMega.vx * t;
-      const ty = bestMega.y + bestMega.vy * t;
-      snake.targetAngle = Math.atan2(ty - head.y, tx - head.x);
-      snake.boosting = bestMegaDist > 500 && snake.score > 20;
-      return;
-    }
-
-    // Hunt smaller snakes — try to cut off their path
-    let bestPrey = null;
-    let bestPreyDist = 700;
-    for (const other of snakes) {
-      if (other.id === snake.id || !other.alive) continue;
-      if (other.score >= snake.score * 0.7) continue;
-      const ohead = other.segments[0];
-      const dx = ohead.x - head.x;
-      const dy = ohead.y - head.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < bestPreyDist) { bestPreyDist = d; bestPrey = other; }
-    }
-    if (bestPrey) {
-      // Predict where prey will be and aim there
-      const lookahead = 0.8 + bestPreyDist / 400;
-      const targetX = bestPrey.segments[0].x + Math.cos(bestPrey.angle) * SNAKE_SPEED * lookahead;
-      const targetY = bestPrey.segments[0].y + Math.sin(bestPrey.angle) * SNAKE_SPEED * lookahead;
-      snake.targetAngle = Math.atan2(targetY - head.y, targetX - head.x);
-      snake.boosting = bestPreyDist > 250 && snake.score > 40;
-      return;
-    }
-
-    // Look for high-value food (value-to-distance ratio)
-    let bestFood = null;
-    let bestRatio = 0;
-    for (const f of food) {
-      const dx = f.x - head.x;
-      if (dx > 800 || dx < -800) continue;
-      const dy = f.y - head.y;
-      if (dy > 800 || dy < -800) continue;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      const ratio = (f.value || 1) / (d + 50);
-      if (ratio > bestRatio) { bestRatio = ratio; bestFood = f; }
-    }
-    if (bestFood) {
-      snake.targetAngle = Math.atan2(bestFood.y - head.y, bestFood.x - head.x);
-      snake.boosting = false;
-      return;
-    }
-
-    snake.botWanderAngle += (Math.random() - 0.5) * 0.5;
-    snake.targetAngle = snake.botWanderAngle;
-    snake.boosting = false;
-  }
-
-  // --- Physics ---
-  // segments[0] = head position (continuous)
-  // segments[1..] = body anchors, each exactly SEGMENT_SPACING from the previous
-  function updateSnake(snake, dt) {
-    let angleDiff = snake.targetAngle - snake.angle;
-    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-    const turnSpeed = 4.0;
-    if (Math.abs(angleDiff) < turnSpeed * dt) {
-      snake.angle = snake.targetAngle;
-    } else {
-      snake.angle += Math.sign(angleDiff) * turnSpeed * dt;
-    }
-
-    // Bots can't boost without sufficient score
-    if (snake.boosting && snake.score <= 0) snake.boosting = false;
-
-    const speed = snake.boosting ? BOOST_SPEED : SNAKE_SPEED;
-    const head = snake.segments[0];
-    head.x += Math.cos(snake.angle) * speed * dt;
-    head.y += Math.sin(snake.angle) * speed * dt;
-
-    // World bounds
-    const half = MAP_SIZE / 2;
-    if (head.x < -half || head.x > half || head.y < -half || head.y > half) {
-      killSnake(snake, null);
-      return;
-    }
-
-    // Insert new body anchors when head has moved >= SEGMENT_SPACING from segments[1]
-    while (snake.segments.length >= 2) {
-      const dx = head.x - snake.segments[1].x;
-      const dy = head.y - snake.segments[1].y;
-      const distSq = dx * dx + dy * dy;
-      if (distSq < SEGMENT_SPACING * SEGMENT_SPACING) break;
-      const dist = Math.sqrt(distSq);
-      const t = SEGMENT_SPACING / dist;
-      snake.segments.splice(1, 0, {
-        x: snake.segments[1].x + dx * t,
-        y: snake.segments[1].y + dy * t,
-      });
-    }
-
-    // Length grows slowly — thickness is the main growth indicator
-    const targetLength = INITIAL_LENGTH + Math.floor(snake.score / 6);
-    while (snake.segments.length > targetLength) snake.segments.pop();
-
-    // Boost cost — drains score and drops a small food orb
-    if (snake.boosting && snake.score > 0) {
-      snake.boostAccum += BOOST_SHRINK_RATE * dt;
-      if (snake.boostAccum >= 1) {
-        const removed = Math.floor(snake.boostAccum);
-        snake.boostAccum -= removed;
-        snake.score = Math.max(0, snake.score - removed);
-        // Drop food behind tail
-        if (snake.segments.length > 0) {
-          const tail = snake.segments[snake.segments.length - 1];
-          food.push({
-            x: tail.x + (Math.random() - 0.5) * 14,
-            y: tail.y + (Math.random() - 0.5) * 14,
-            color: snake.color,
-            radius: 5 + Math.random() * 2,
-            value: 1,
-            tier: 0,
-          });
-        }
-      }
-    }
-
-    // Eat regular food (use thickened head radius, with fast box reject)
-    const headR = HEAD_RADIUS * getThickness(snake);
-    const eatRange = headR + 30; // max f.radius is ~24
-    for (let i = food.length - 1; i >= 0; i--) {
-      const f = food[i];
-      const dx = f.x - head.x;
-      if (dx > eatRange || dx < -eatRange) continue;
-      const dy = f.y - head.y;
-      if (dy > eatRange || dy < -eatRange) continue;
-      const sumR = headR + f.radius;
-      if (dx * dx + dy * dy < sumR * sumR) {
-        food.splice(i, 1);
-        snake.score += f.value || 1;
-        spawnEatParticles(f.x, f.y, f.color);
-      }
-    }
-
-    // Eat mega orbs
-    for (let i = megaOrbs.length - 1; i >= 0; i--) {
-      const m = megaOrbs[i];
-      const dx = head.x - m.x;
-      const dy = head.y - m.y;
-      if (dx * dx + dy * dy < (headR + m.radius) ** 2) {
-        megaOrbs.splice(i, 1);
-        snake.score += m.value;
-        spawnDeathParticles(m.x, m.y, m.color);
-        if (snake.id === myId) screenShake = 8;
-        // Respawn a new one elsewhere
-        megaOrbs.push(createMegaOrb());
-      }
-    }
-  }
-
-  function updateMegaOrbs(dt) {
-    const half = MAP_SIZE / 2 - 50;
-    for (const m of megaOrbs) {
-      m.x += m.vx * dt;
-      m.y += m.vy * dt;
-      m.spin += dt * 1.5;
-      if (m.x < -half) { m.x = -half; m.vx = Math.abs(m.vx); }
-      if (m.x > half)  { m.x = half;  m.vx = -Math.abs(m.vx); }
-      if (m.y < -half) { m.y = -half; m.vy = Math.abs(m.vy); }
-      if (m.y > half)  { m.y = half;  m.vy = -Math.abs(m.vy); }
-    }
-  }
-
-  function checkCollisions() {
-    for (let i = 0; i < snakes.length; i++) {
-      const a = snakes[i];
-      if (!a.alive) continue;
-      const ahead = a.segments[0];
-      const aHeadR = HEAD_RADIUS * getThickness(a);
-
-      for (let j = 0; j < snakes.length; j++) {
-        if (i === j) continue;
-        const b = snakes[j];
-        if (!b.alive) continue;
-        const bDotR = DOT_RADIUS * getThickness(b);
-        const dist = aHeadR + bDotR;
-        const distSq = dist * dist;
-
-        for (let k = 1; k < b.segments.length; k++) {
-          const seg = b.segments[k];
-          const dx = ahead.x - seg.x;
-          const dy = ahead.y - seg.y;
-          if (dx * dx + dy * dy < distSq) {
-            killSnake(a, b);
-            b.score += Math.floor(a.segments.length / 2 + a.score / 4);
-            break;
-          }
-        }
-        if (!a.alive) break;
-      }
-    }
-  }
-
-  function killSnake(snake, killer) {
-    if (!snake.alive) return;
-    snake.alive = false;
-
-    // Drop food along the body — bigger snake = bigger drops
-    for (let i = 0; i < snake.segments.length; i += 2) {
-      const seg = snake.segments[i];
-      food.push({
-        x: seg.x + (Math.random() - 0.5) * 20,
-        y: seg.y + (Math.random() - 0.5) * 20,
-        color: snake.color,
-        radius: 8 + Math.random() * 4,
-        value: 3 + Math.floor(Math.random() * 3),
-        tier: 2,
-      });
-    }
-
-    spawnDeathParticles(snake.segments[0].x, snake.segments[0].y, snake.color);
-
-    if (snake.id === myId) {
-      finalScoreEl.textContent = snake.score;
-      deathScreen.style.display = 'flex';
-      document.body.style.cursor = 'default';
-      screenShake = 15;
-      running = false;
-    }
-  }
-
-  function respawnBot(snake) {
-    const angle = Math.random() * Math.PI * 2;
-    const pos = randomZonedPosition(1.2);
-    snake.segments = [];
-    for (let i = 0; i < INITIAL_LENGTH; i++) {
-      snake.segments.push({
-        x: pos.x - Math.cos(angle) * i * SEGMENT_SPACING,
-        y: pos.y - Math.sin(angle) * i * SEGMENT_SPACING,
-      });
-    }
-    snake.angle = angle;
-    snake.targetAngle = angle;
-    snake.score = 0;
-    snake.alive = true;
-    snake.boosting = false;
-    snake.boostAccum = 0;
-    snake.skin = Math.floor(Math.random() * SKINS.length);
-    const skin = SKINS[snake.skin];
-    snake.color = COLORS.indexOf(skin.colors[0]) >= 0 ? COLORS.indexOf(skin.colors[0]) : 0;
-    // Reroll skill level (advanced count is checked dynamically)
-    snake.skill = randomBotSkill();
-  }
-
-  // --- Particles ---
-  function spawnDeathParticles(x, y, colorIdx) {
-    const color = COLORS[colorIdx] || COLORS[0];
+    const color = skin.colors[0];
     for (let i = 0; i < 40; i++) {
       const a = Math.random() * Math.PI * 2;
       const s = 50 + Math.random() * 200;
@@ -771,8 +392,9 @@
     }
   }
 
-  function spawnEatParticles(x, y, colorIdx) {
-    const color = COLORS[colorIdx] || COLORS[0];
+  function spawnEatParticles(x, y, skinIdx) {
+    const skin = SKINS[skinIdx] || SKINS[0];
+    const color = skin.colors[0];
     for (let i = 0; i < 6; i++) {
       const a = Math.random() * Math.PI * 2;
       const s = 30 + Math.random() * 80;
@@ -793,13 +415,14 @@
     }
   }
 
-  // --- Rendering ---
+  // =====================================================
+  // Rendering (unchanged from single-player)
+  // =====================================================
   function drawGrid(cx, cy) {
     const gridSize = 60;
     const halfW = canvas.width / (2 * zoom);
     const halfH = canvas.height / (2 * zoom);
     const midX = canvas.width / 2, midY = canvas.height / 2;
-    // Draw grid lines that span the expanded visible user-space area
     const startX = Math.floor((cx - halfW) / gridSize) * gridSize;
     const startY = Math.floor((cy - halfH) / gridSize) * gridSize;
     const endX = cx + halfW + gridSize;
@@ -843,7 +466,6 @@
       const r = f.radius * pulse;
       const color = COLORS[f.color] || COLORS[0];
 
-      // Soft halo for big food (cheap semi-transparent circle, no gradient)
       if (tier >= 4) {
         ctx.fillStyle = color;
         ctx.globalAlpha = 0.12;
@@ -874,7 +496,6 @@
       const r = m.radius * pulse;
       const color = COLORS[m.color] || COLORS[0];
 
-      // Big outer halo
       const halo = ctx.createRadialGradient(sx, sy, r * 0.5, sx, sy, r * 3.5);
       halo.addColorStop(0, hexFull(color) + 'aa');
       halo.addColorStop(0.4, hexFull(color) + '33');
@@ -884,19 +505,17 @@
       ctx.arc(sx, sy, r * 3.5, 0, Math.PI * 2);
       ctx.fill();
 
-      // Rotating sparkle ring
       ctx.strokeStyle = color;
       ctx.globalAlpha = 0.7;
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 8]);
-      ctx.lineDashOffset = -m.spin * 10;
+      ctx.lineDashOffset = -animTime * 15;
       ctx.beginPath();
       ctx.arc(sx, sy, r * 1.5, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;
 
-      // Main orb (only element that gets shadow — just 12 total)
       ctx.shadowColor = color;
       ctx.shadowBlur = 25;
       ctx.fillStyle = color;
@@ -905,16 +524,13 @@
       ctx.fill();
       ctx.shadowBlur = 0;
 
-      // Bright core
       ctx.fillStyle = '#fff';
       ctx.globalAlpha = 0.75;
       ctx.beginPath();
       ctx.arc(sx - r * 0.25, sy - r * 0.25, r * 0.45, 0, Math.PI * 2);
       ctx.fill();
-
       ctx.globalAlpha = 1;
 
-      // Value label
       ctx.font = 'bold 14px "Segoe UI", sans-serif';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#fff';
@@ -935,7 +551,6 @@
     const halfH = canvas.height / (2 * zoom) + 80;
     const midX = canvas.width / 2, midY = canvas.height / 2;
 
-    // Body dots — NO shadowBlur (the #1 perf killer)
     ctx.shadowBlur = 0;
 
     for (let i = segs.length - 1; i >= 1; i--) {
@@ -956,7 +571,6 @@
     }
     ctx.globalAlpha = 1;
 
-    // Head — shadow only on player's own head (1 blur per frame, fine)
     const head = segs[0];
     const hx = head.x - cx + canvas.width / 2;
     const hy = head.y - cy + canvas.height / 2;
@@ -972,7 +586,6 @@
     ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Eyes
     const eyeOff = headR * 0.5;
     const eyeR = headR * 0.28;
     const perp = angle + Math.PI / 2;
@@ -987,13 +600,11 @@
       ctx.fill();
     }
 
-    // Boost trail
     if (snake.boosting && segs.length > 2 && Math.random() < 0.4) {
       const tail = segs[segs.length - 1];
-      spawnEatParticles(tail.x, tail.y, snake.color);
+      spawnEatParticles(tail.x, tail.y, snake.skin);
     }
 
-    // Name
     ctx.font = 'bold 13px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.8)';
@@ -1035,7 +646,6 @@
     const scale = w / MAP_SIZE;
     const ox = w / 2, oy = h / 2;
 
-    // Mega orbs as bright pulsing dots
     const megaPulse = 0.7 + 0.3 * Math.sin(animTime * 4);
     for (const m of megaOrbs) {
       minimapCtx.fillStyle = COLORS[m.color];
@@ -1063,61 +673,21 @@
     minimapCtx.strokeRect(cx * scale + ox - vw / 2, cy * scale + oy - vh / 2, vw, vh);
   }
 
-  function updateLeaderboard() {
-    const sorted = snakes
-      .filter(s => s.alive)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
-
-    leaderboardEntries.innerHTML = '';
-    for (const s of sorted) {
-      const div = document.createElement('div');
-      div.className = 'entry' + (s.id === myId ? ' me' : '');
-      div.innerHTML = `<span>${s.name}</span><span>${s.score}</span>`;
-      leaderboardEntries.appendChild(div);
-    }
-    playerCountEl.textContent = `Players: ${snakes.filter(s => s.alive).length}`;
-  }
-
-  // --- Main loop ---
-  let leaderboardTimer = 0;
-
+  // =====================================================
+  // Main render loop — no physics, just draw + send input
+  // =====================================================
   function frame(now) {
     requestAnimationFrame(frame);
     const dt = Math.min((now - lastFrame) / 1000, 0.05);
     lastFrame = now;
     animTime += dt;
 
+    // Send direction at ~20Hz
     if (running) {
-      const me = snakes.find(s => s.id === myId);
-      if (me && me.alive) {
-        me.targetAngle = Math.atan2(mouseY - canvas.height / 2, mouseX - canvas.width / 2);
-        me.boosting = boosting;
-      }
-
-      for (const snake of snakes) {
-        if (snake.isBot && snake.alive) updateBotAI(snake, dt);
-      }
-      updateMegaOrbs(dt);
-      for (const snake of snakes) {
-        if (snake.alive) updateSnake(snake, dt);
-      }
-      checkCollisions();
-      for (const snake of snakes) {
-        if (snake.isBot && !snake.alive) respawnBot(snake);
-      }
-      while (food.length < FOOD_COUNT) food.push(createFood());
-
-      if (me && me.alive) {
-        camera.x += (me.segments[0].x - camera.x) * 0.12;
-        camera.y += (me.segments[0].y - camera.y) * 0.12;
-        myScoreEl.textContent = `Score: ${me.score}`;
-      }
-
-      leaderboardTimer += dt;
-      if (leaderboardTimer >= 1) {
-        updateLeaderboard();
-        leaderboardTimer = 0;
+      sendTimer += dt;
+      if (sendTimer >= 0.05) {
+        sendDirection();
+        sendTimer = 0;
       }
     }
 
@@ -1133,11 +703,8 @@
     const cx = camera.x + shakeX;
     const cy = camera.y + shakeY;
 
-    // Dynamic zoom — shrink as player grows
-    const me = snakes.find(s => s.id === myId);
-    const targetZoom = me && me.alive
-      ? Math.max(0.35, BASE_ZOOM - Math.min(me.score / 300, 0.37))
-      : BASE_ZOOM;
+    // Dynamic zoom
+    const targetZoom = Math.max(0.35, BASE_ZOOM - Math.min(lastScore / 300, 0.37));
     zoom += (targetZoom - zoom) * 0.05;
 
     // --- Draw ---
@@ -1154,9 +721,6 @@
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Apply zoom transform for world rendering. Existing draw code
-    // computes pre-scale "screen-like" coords around the canvas center,
-    // so this scale(zoom) about the center handles everything in one step.
     ctx.save();
     ctx.translate(canvas.width / 2, canvas.height / 2);
     ctx.scale(zoom, zoom);
@@ -1167,16 +731,16 @@
     drawFood(cx, cy);
     drawMegaOrbs(cx, cy);
 
+    const me = snakes.find(s => s.id === myId);
     for (const snake of snakes) {
       if (snake.alive && snake.id !== myId) drawSnake(snake, cx, cy);
     }
     if (me && me.alive) drawSnake(me, cx, cy);
 
     drawParticles(cx, cy);
-
     ctx.restore();
 
-    // In-game cursor
+    // In-game cursor (screen space)
     if (running) {
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
       ctx.lineWidth = 1.5;
