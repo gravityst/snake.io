@@ -26,17 +26,18 @@
   const minimapCtx = minimapCanvas.getContext('2d');
 
   // --- Config ---
-  const MAP_SIZE = 14000;          // massive map
-  const FOOD_COUNT = 2200;         // scaled for larger map
+  const MAP_SIZE = 9000;           // large but playable
+  const FOOD_COUNT = 1500;
   const SNAKE_SPEED = 200;
   const BOOST_SPEED = 380;
-  const SEGMENT_SPACING = 24;      // base distance between body dot centers
-  const DOT_RADIUS = 9;            // base radius of each body dot
+  const SEGMENT_SPACING = 24;
+  const DOT_RADIUS = 9;
   const INITIAL_LENGTH = 10;
-  const HEAD_RADIUS = 14;          // base head radius
-  const BOOST_SHRINK_RATE = 2.5;   // points lost per second while boosting
-  const BOT_COUNT = 30;            // more bots for larger map
-  const MEGA_ORB_COUNT = 8;
+  const HEAD_RADIUS = 14;
+  const BOOST_SHRINK_RATE = 2.5;
+  const BOT_COUNT = 40;
+  const MEGA_ORB_COUNT = 6;
+  const BASE_ZOOM = 0.72;          // camera zoom (smaller = sees more)
   const MAX_ADVANCED_BOTS = 2;     // hard cap on rare advanced AI
   // Bot skill tiers
   const SKILL_BEGINNER = 0;
@@ -171,6 +172,7 @@
   let screenShake = 0;
   let lastFrame = 0;
   let animTime = 0;
+  let zoom = BASE_ZOOM;            // dynamic, shrinks as player grows
 
   // --- Resize ---
   function resize() {
@@ -247,8 +249,8 @@
   function createSnake(name, isBot, skinIdx, skill) {
     const id = nextId++;
     const angle = Math.random() * Math.PI * 2;
-    // Bots spawn weighted toward edges (power<1), player toward center (power>1)
-    const pos = isBot ? randomZonedPosition(0.55) : randomZonedPosition(1.8);
+    // Both bots and player cluster toward center; bots slightly wider spread
+    const pos = isBot ? randomZonedPosition(1.2) : randomZonedPosition(2.5);
     const x = pos.x, y = pos.y;
     const segments = [];
     for (let i = 0; i < INITIAL_LENGTH; i++) {
@@ -729,8 +731,7 @@
 
   function respawnBot(snake) {
     const angle = Math.random() * Math.PI * 2;
-    // Bots respawn biased toward the edges (power<1)
-    const pos = randomZonedPosition(0.55);
+    const pos = randomZonedPosition(1.2);
     snake.segments = [];
     for (let i = 0; i < INITIAL_LENGTH; i++) {
       snake.segments.push({
@@ -789,19 +790,25 @@
   // --- Rendering ---
   function drawGrid(cx, cy) {
     const gridSize = 60;
-    const startX = Math.floor((cx - canvas.width / 2) / gridSize) * gridSize;
-    const startY = Math.floor((cy - canvas.height / 2) / gridSize) * gridSize;
+    const halfW = canvas.width / (2 * zoom);
+    const halfH = canvas.height / (2 * zoom);
+    const midX = canvas.width / 2, midY = canvas.height / 2;
+    // Draw grid lines that span the expanded visible user-space area
+    const startX = Math.floor((cx - halfW) / gridSize) * gridSize;
+    const startY = Math.floor((cy - halfH) / gridSize) * gridSize;
+    const endX = cx + halfW + gridSize;
+    const endY = cy + halfH + gridSize;
 
     ctx.strokeStyle = 'rgba(0, 255, 255, 0.04)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1 / zoom;
     ctx.beginPath();
-    for (let x = startX; x <= startX + canvas.width + gridSize * 2; x += gridSize) {
-      const sx = x - cx + canvas.width / 2;
-      ctx.moveTo(sx, 0); ctx.lineTo(sx, canvas.height);
+    for (let x = startX; x <= endX; x += gridSize) {
+      const sx = x - cx + midX;
+      ctx.moveTo(sx, midY - halfH); ctx.lineTo(sx, midY + halfH);
     }
-    for (let y = startY; y <= startY + canvas.height + gridSize * 2; y += gridSize) {
-      const sy = y - cy + canvas.height / 2;
-      ctx.moveTo(0, sy); ctx.lineTo(canvas.width, sy);
+    for (let y = startY; y <= endY; y += gridSize) {
+      const sy = y - cy + midY;
+      ctx.moveTo(midX - halfW, sy); ctx.lineTo(midX + halfW, sy);
     }
     ctx.stroke();
   }
@@ -819,10 +826,13 @@
   }
 
   function drawFood(cx, cy) {
+    const halfW = canvas.width / (2 * zoom) + 40;
+    const halfH = canvas.height / (2 * zoom) + 40;
+    const midX = canvas.width / 2, midY = canvas.height / 2;
     for (const f of food) {
-      const sx = f.x - cx + canvas.width / 2;
-      const sy = f.y - cy + canvas.height / 2;
-      if (sx < -30 || sx > canvas.width + 30 || sy < -30 || sy > canvas.height + 30) continue;
+      const sx = f.x - cx + midX;
+      const sy = f.y - cy + midY;
+      if (sx < midX - halfW || sx > midX + halfW || sy < midY - halfH || sy > midY + halfH) continue;
 
       const tier = f.tier || 0;
       const pulseAmt = 0.15 + tier * 0.04;
@@ -861,10 +871,13 @@
   }
 
   function drawMegaOrbs(cx, cy) {
+    const halfW = canvas.width / (2 * zoom) + 120;
+    const halfH = canvas.height / (2 * zoom) + 120;
+    const midX = canvas.width / 2, midY = canvas.height / 2;
     for (const m of megaOrbs) {
-      const sx = m.x - cx + canvas.width / 2;
-      const sy = m.y - cy + canvas.height / 2;
-      if (sx < -100 || sx > canvas.width + 100 || sy < -100 || sy > canvas.height + 100) continue;
+      const sx = m.x - cx + midX;
+      const sy = m.y - cy + midY;
+      if (sx < midX - halfW || sx > midX + halfW || sy < midY - halfH || sy > midY + halfH) continue;
 
       const pulse = 0.92 + 0.08 * Math.sin(animTime * 4);
       const r = m.radius * pulse;
@@ -930,14 +943,18 @@
     const dotR = DOT_RADIUS * thickness;
     const headR = HEAD_RADIUS * thickness;
 
+    const halfW = canvas.width / (2 * zoom) + 80;
+    const halfH = canvas.height / (2 * zoom) + 80;
+    const midX = canvas.width / 2, midY = canvas.height / 2;
+
     // Body dots with per-segment coloring
     ctx.shadowBlur = snake.boosting ? 18 : 10;
 
     for (let i = segs.length - 1; i >= 1; i--) {
       const seg = segs[i];
-      const sx = seg.x - cx + canvas.width / 2;
-      const sy = seg.y - cy + canvas.height / 2;
-      if (sx < -50 || sx > canvas.width + 50 || sy < -50 || sy > canvas.height + 50) continue;
+      const sx = seg.x - cx + midX;
+      const sy = seg.y - cy + midY;
+      if (sx < midX - halfW || sx > midX + halfW || sy < midY - halfH || sy > midY + halfH) continue;
 
       const tailT = i / segs.length;
       const r = dotR * (1 - tailT * 0.35);
@@ -1009,10 +1026,13 @@
   }
 
   function drawParticles(cx, cy) {
+    const halfW = canvas.width / (2 * zoom) + 40;
+    const halfH = canvas.height / (2 * zoom) + 40;
+    const midX = canvas.width / 2, midY = canvas.height / 2;
     for (const p of particles) {
-      const sx = p.x - cx + canvas.width / 2;
-      const sy = p.y - cy + canvas.height / 2;
-      if (sx < -20 || sx > canvas.width + 20 || sy < -20 || sy > canvas.height + 20) continue;
+      const sx = p.x - cx + midX;
+      const sy = p.y - cy + midY;
+      if (sx < midX - halfW || sx > midX + halfW || sy < midY - halfH || sy > midY + halfH) continue;
       ctx.globalAlpha = p.life;
       ctx.shadowColor = p.color;
       ctx.shadowBlur = 8;
@@ -1135,7 +1155,15 @@
     const cx = camera.x + shakeX;
     const cy = camera.y + shakeY;
 
+    // Dynamic zoom — shrink as player grows
+    const me = snakes.find(s => s.id === myId);
+    const targetZoom = me && me.alive
+      ? Math.max(0.45, BASE_ZOOM - Math.min(me.score / 600, 0.27))
+      : BASE_ZOOM;
+    zoom += (targetZoom - zoom) * 0.05;
+
     // --- Draw ---
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#0a0a1a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -1148,6 +1176,14 @@
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    // Apply zoom transform for world rendering. Existing draw code
+    // computes pre-scale "screen-like" coords around the canvas center,
+    // so this scale(zoom) about the center handles everything in one step.
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-canvas.width / 2, -canvas.height / 2);
+
     drawGrid(cx, cy);
     drawBorder(cx, cy);
     drawFood(cx, cy);
@@ -1156,10 +1192,11 @@
     for (const snake of snakes) {
       if (snake.alive && snake.id !== myId) drawSnake(snake, cx, cy);
     }
-    const me = snakes.find(s => s.id === myId);
     if (me && me.alive) drawSnake(me, cx, cy);
 
     drawParticles(cx, cy);
+
+    ctx.restore();
 
     // In-game cursor
     if (running) {
