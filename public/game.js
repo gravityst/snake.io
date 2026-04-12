@@ -121,7 +121,7 @@
   // --- Helpers ---
   function hexFull(c) { if (c.length===4) return '#'+c[1]+c[1]+c[2]+c[2]+c[3]+c[3]; return c; }
   function getSegColor(snake, i) { const skin = SKINS[snake.skin]||SKINS[0]; return skin.colors[i%skin.colors.length]; }
-  function getThickness(snake) { return 1 + Math.min(snake.score/80, 2.5); }
+  function getThickness(snake) { return 1 + Math.min(snake.score/500, 0.8); }
 
   // --- Game state ---
   let snakes = [], food = [], megaOrbs = [], particles = [];
@@ -588,7 +588,7 @@
         playerCountEl.textContent=`Players: ${localGame.snakes.filter(s=>s.alive).length}`;
       } else if (gameMode==='multiplayer') {
         sendTimer += dt;
-        if (sendTimer >= 0.05) { sendDirection(); sendTimer = 0; }
+        if (sendTimer >= 0.033) { sendDirection(); sendTimer = 0; }
       }
     }
 

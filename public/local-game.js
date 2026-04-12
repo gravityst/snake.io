@@ -142,8 +142,8 @@ class LocalGame {
     let ad = snake.targetAngle - snake.angle;
     while (ad > Math.PI) ad -= Math.PI*2;
     while (ad < -Math.PI) ad += Math.PI*2;
-    if (Math.abs(ad) < 4*dt) snake.angle = snake.targetAngle;
-    else snake.angle += Math.sign(ad) * 4 * dt;
+    if (Math.abs(ad) < 6.5*dt) snake.angle = snake.targetAngle;
+    else snake.angle += Math.sign(ad) * 6.5 * dt;
     if (snake.boosting && snake.score <= 0) snake.boosting = false;
     const speed = snake.boosting ? this.BOOST_SPEED : this.SNAKE_SPEED;
     const head = snake.segments[0];
@@ -157,7 +157,7 @@ class LocalGame {
       const dist=Math.sqrt(dx*dx+dy*dy), t=this.SEGMENT_SPACING/dist;
       snake.segments.splice(1,0,{x:snake.segments[1].x+dx*t, y:snake.segments[1].y+dy*t});
     }
-    const tl = this.INITIAL_LENGTH + Math.floor(snake.score/6);
+    const tl = this.INITIAL_LENGTH + Math.floor(snake.score/12);
     while (snake.segments.length > tl) snake.segments.pop();
     if (snake.boosting && snake.score > 0) {
       snake.boostAccum += this.BOOST_SHRINK_RATE*dt;

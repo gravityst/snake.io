@@ -17,7 +17,7 @@ const MAX_BOTS = 15;
 const MEGA_ORB_COUNT = 12;
 const TICK_RATE = 30;
 const TICK_MS = 1000 / TICK_RATE;
-const BROADCAST_RATE = 20;
+const BROADCAST_RATE = 30;
 const BROADCAST_MS = 1000 / BROADCAST_RATE;
 const MAX_ADVANCED_BOTS = 2;
 const MAX_PLAYERS_PER_ROOM = 30;
@@ -96,7 +96,7 @@ class Room {
     const a = Math.random() * Math.PI * 2;
     return { x: Math.cos(a)*r, y: Math.sin(a)*r };
   }
-  _thickness(s) { return 1 + Math.min(s.score/80, 2.5); }
+  _thickness(s) { return 1 + Math.min(s.score/500, 0.8); }
   _randomSkill() {
     const adv = this.bots.filter(id => { const s=this.snakes.get(id); return s&&s.alive&&s.skill===SKILL_ADVANCED; }).length;
     const r = Math.random();
@@ -333,7 +333,7 @@ class Room {
   _updateSnake(snake,dt) {
     let ad=snake.targetAngle-snake.angle;
     while(ad>Math.PI)ad-=Math.PI*2;while(ad<-Math.PI)ad+=Math.PI*2;
-    if(Math.abs(ad)<4*dt)snake.angle=snake.targetAngle;else snake.angle+=Math.sign(ad)*4*dt;
+    if(Math.abs(ad)<6.5*dt)snake.angle=snake.targetAngle;else snake.angle+=Math.sign(ad)*6.5*dt;
     if(snake.boosting&&snake.score<=0)snake.boosting=false;
     const speed=snake.boosting?BOOST_SPEED:SNAKE_SPEED;
     const head=snake.segments[0];
@@ -346,7 +346,7 @@ class Room {
       const dist=Math.sqrt(dx*dx+dy*dy),t=SEGMENT_SPACING/dist;
       snake.segments.splice(1,0,{x:snake.segments[1].x+dx*t,y:snake.segments[1].y+dy*t});
     }
-    const tl=INITIAL_LENGTH+Math.floor(snake.score/6);
+    const tl=INITIAL_LENGTH+Math.floor(snake.score/12);
     while(snake.segments.length>tl)snake.segments.pop();
     if(snake.boosting&&snake.score>0){
       snake.boostAccum+=BOOST_SHRINK_RATE*dt;
