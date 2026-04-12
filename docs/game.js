@@ -1408,7 +1408,7 @@
     menuAnimTime += dt;
 
     // Show bg when not actively in gameplay (hud visible = in game)
-    const inGame = hud.style.display === 'block' && !deathScreen.style.display;
+    const inGame = hud.style.display === 'block';
     menuBg.style.display = inGame ? 'none' : 'block';
     if (inGame) return;
 
