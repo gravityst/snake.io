@@ -346,7 +346,7 @@
       if (idx === 0) {
         cx.fillStyle='rgba(255,255,255,0.3)';cx.font='22px sans-serif';cx.textAlign='center';cx.fillText('✕',40,38);
       } else {
-        try { drawAccessory(cx, idx, 40, 35, 18, -Math.PI/2); }
+        try { drawAccessory(cx, idx, 40, 35, 18, Math.PI/2); }
         catch(e) { cx.fillStyle='#f44';cx.font='10px sans-serif';cx.textAlign='center';cx.fillText('ERR',40,35); }
       }
       card.appendChild(c);
