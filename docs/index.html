@@ -111,56 +111,42 @@
       align-items: center;
       justify-content: center;
       z-index: 100;
-      background: radial-gradient(ellipse at center, #0d1b2a 0%, #0a0a1a 70%);
+      background: transparent;
     }
+    #skinScreen { overflow-y: auto; }
     #skinScreen h2 {
-      font-size: 36px;
-      color: #fff;
-      text-shadow: 0 0 15px #0ff;
-      margin-bottom: 30px;
-      letter-spacing: 3px;
+      font-size: 32px; color: #fff; text-shadow: 0 0 15px #0ff;
+      margin-bottom: 12px; letter-spacing: 3px;
     }
+    /* Tab bar */
+    .tab-bar {
+      display: flex; gap: 0; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .tab-btn {
+      padding: 10px 24px; font-size: 14px; font-weight: bold; letter-spacing: 2px;
+      color: rgba(255,255,255,0.4); background: none; border: none; cursor: pointer;
+      border-bottom: 2px solid transparent; transition: color 0.2s, border-color 0.2s;
+      text-transform: uppercase;
+    }
+    .tab-btn:hover { color: rgba(255,255,255,0.7); }
+    .tab-btn.active { color: #0ff; border-bottom-color: #0ff; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: flex; flex-direction: column; align-items: center; }
+
     .skin-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-      max-width: 520px;
-      margin-bottom: 30px;
-      padding: 0 20px;
+      display: grid; grid-template-columns: repeat(5, 1fr);
+      gap: 10px; max-width: 560px; margin-bottom: 16px; padding: 0 10px;
     }
     .skin-card {
-      width: 110px;
-      height: 90px;
-      border: 1.5px solid rgba(255,255,255,0.15);
-      border-radius: 16px;
-      background: rgba(0, 20, 40, 0.4);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      cursor: pointer;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      transition: transform 0.2s, border-color 0.3s, box-shadow 0.3s;
-      position: relative;
-      overflow: hidden;
+      width: 100px; height: 75px;
+      border: 1.5px solid rgba(255,255,255,0.12); border-radius: 12px;
+      background: rgba(0, 15, 30, 0.5); cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+      transition: transform 0.15s, border-color 0.2s;
     }
-    .skin-card:hover {
-      transform: scale(1.08);
-      border-color: rgba(0, 255, 255, 0.5);
-      box-shadow: 0 0 20px rgba(0, 255, 255, 0.15);
-    }
-    .skin-card.selected {
-      border-color: #0ff;
-      box-shadow: 0 0 25px rgba(0, 255, 255, 0.3), inset 0 0 15px rgba(0, 255, 255, 0.05);
-      background: rgba(0, 40, 60, 0.5);
-    }
-    .skin-dots {
-      display: flex;
-      gap: 4px;
-      align-items: center;
-    }
+    .skin-card:hover { transform: scale(1.06); border-color: rgba(0,255,255,0.4); }
+    .skin-card.selected { border-color: #0ff; background: rgba(0,30,50,0.6); }
+    .skin-dots { display: flex; gap: 3px; align-items: center; }
     .skin-dot {
       width: 14px;
       height: 14px;
@@ -283,7 +269,7 @@
     #roomScreen {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
       display: none; flex-direction: column; align-items: center; justify-content: center;
-      z-index: 100; background: radial-gradient(ellipse at center, #0d1b2a 0%, #0a0a1a 70%);
+      z-index: 100; background: transparent;
     }
     #roomScreen h2 { font-size: 36px; color: #fff; text-shadow: 0 0 15px #0ff; margin-bottom: 24px; letter-spacing: 3px; }
     .room-list { display: flex; flex-direction: column; gap: 10px; max-height: 55vh; overflow-y: auto; width: 420px; padding: 0 10px; margin-bottom: 24px; }
@@ -319,7 +305,7 @@
     #teamScreen {
       position: fixed; top:0; left:0; right:0; bottom:0;
       display: none; flex-direction: column; align-items: center; justify-content: center;
-      z-index: 100; background: radial-gradient(ellipse at center, #0d1b2a 0%, #0a0a1a 70%);
+      z-index: 100; background: transparent;
     }
     #teamScreen h2 { font-size: 36px; color: #fff; text-shadow: 0 0 15px #f80; margin-bottom: 24px; letter-spacing: 3px; }
     .team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; width: 500px; margin-bottom: 24px; }
@@ -340,7 +326,7 @@
     #createRoomScreen {
       position: fixed; top:0; left:0; right:0; bottom:0;
       display: none; flex-direction: column; align-items: center; justify-content: center;
-      z-index: 100; background: radial-gradient(ellipse at center, #0d1b2a 0%, #0a0a1a 70%);
+      z-index: 100; background: transparent;
     }
     #createRoomScreen h2 { font-size: 32px; color: #fff; text-shadow: 0 0 15px #f0f; margin-bottom: 20px; letter-spacing: 3px; }
     .create-form { display: flex; flex-direction: column; gap: 14px; width: 340px; align-items: center; }
@@ -425,12 +411,30 @@
   </div>
 
   <div id="skinScreen">
-    <h2>CHOOSE SKIN</h2>
-    <canvas id="skinPreview" width="320" height="120" style="border:1px solid rgba(0,255,255,0.15);border-radius:12px;background:rgba(0,10,20,0.5);margin-bottom:16px;"></canvas>
-    <div class="skin-grid" id="skinGrid"></div>
-    <h3 style="color:#fff;margin:16px 0 10px;letter-spacing:2px;font-size:16px;text-shadow:0 0 10px rgba(255,136,0,0.4);">ACCESSORIES</h3>
-    <div class="skin-grid" id="accessoryGrid" style="max-width:520px;"></div>
-    <button class="glass-btn skin-back-btn" id="skinBackBtn">BACK</button>
+    <h2>CUSTOMIZE</h2>
+    <canvas id="skinPreview" width="400" height="140" style="border:1px solid rgba(0,255,255,0.12);border-radius:14px;background:rgba(0,8,16,0.7);margin-bottom:12px;"></canvas>
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="skinsTab">SKINS</button>
+      <button class="tab-btn" data-tab="accessoriesTab">ACCESSORIES</button>
+      <button class="tab-btn" data-tab="createTab">CREATE SKIN</button>
+    </div>
+    <div class="tab-panel active" id="skinsTab">
+      <div class="skin-grid" id="skinGrid"></div>
+    </div>
+    <div class="tab-panel" id="accessoriesTab">
+      <div class="skin-grid" id="accessoryGrid" style="grid-template-columns:repeat(4,1fr);max-width:480px;"></div>
+    </div>
+    <div class="tab-panel" id="createTab">
+      <p style="color:rgba(255,255,255,0.5);margin-bottom:12px;font-size:13px;">Pick colors for your custom skin</p>
+      <div id="customColors" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:12px;max-width:400px;"></div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <input type="color" id="colorPicker" value="#00ffff" style="width:50px;height:36px;border:none;border-radius:8px;cursor:pointer;background:none;">
+        <button class="glass-btn" id="addColorBtn" style="padding:8px 18px;font-size:14px;">+ ADD COLOR</button>
+        <button class="glass-btn accent-orange" id="clearColorsBtn" style="padding:8px 18px;font-size:14px;">CLEAR</button>
+      </div>
+      <button class="glass-btn" id="applyCustomSkin" style="padding:10px 30px;font-size:15px;">APPLY CUSTOM SKIN</button>
+    </div>
+    <button class="glass-btn" id="skinBackBtn" style="margin-top:14px;padding:10px 30px;font-size:15px;">BACK</button>
   </div>
 
   <div id="deathScreen">

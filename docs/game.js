@@ -99,6 +99,14 @@
     { name: 'Ninja Band' },
     { name: 'Flower' },
     { name: 'Antenna' },
+    { name: 'Bow Tie' },
+    { name: 'Wizard Hat' },
+    { name: 'Cat Ears' },
+    { name: 'Viking Horns' },
+    { name: 'Fire' },
+    { name: 'Ice Crown' },
+    { name: 'Bandana' },
+    { name: 'Stars' },
   ];
 
   function drawAccessory(ctx, accId, hx, hy, headR, angle) {
@@ -170,6 +178,61 @@
       ctx.strokeStyle='#888';ctx.lineWidth=2;
       ctx.beginPath();ctx.moveTo(0,-r*0.5);ctx.quadraticCurveTo(r*0.2,-r*1.5,0,-r*1.8);ctx.stroke();
       ctx.fillStyle='#0ff';ctx.beginPath();ctx.arc(0,-r*1.8,r*0.2,0,Math.PI*2);ctx.fill();
+    } else if (accId === 10) { // Bow Tie
+      ctx.fillStyle='#f44';
+      ctx.beginPath();ctx.moveTo(0,r*0.6);ctx.lineTo(-r*0.6,r*0.3);ctx.lineTo(-r*0.6,r*0.9);ctx.closePath();ctx.fill();
+      ctx.beginPath();ctx.moveTo(0,r*0.6);ctx.lineTo(r*0.6,r*0.3);ctx.lineTo(r*0.6,r*0.9);ctx.closePath();ctx.fill();
+      ctx.fillStyle='#d22';ctx.beginPath();ctx.arc(0,r*0.6,r*0.12,0,Math.PI*2);ctx.fill();
+    } else if (accId === 11) { // Wizard Hat
+      ctx.fillStyle='#228';
+      ctx.beginPath();ctx.moveTo(0,-r*2.2);ctx.lineTo(-r*0.7,-r*0.5);ctx.lineTo(r*0.7,-r*0.5);ctx.closePath();ctx.fill();
+      ctx.strokeStyle='#fc0';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-r*0.75,-r*0.5);ctx.lineTo(r*0.75,-r*0.5);ctx.stroke();
+      ctx.fillStyle='#fc0';ctx.beginPath();ctx.arc(0,-r*2.2,r*0.12,0,Math.PI*2);ctx.fill();
+    } else if (accId === 12) { // Cat Ears
+      ctx.fillStyle='#fa8';
+      ctx.beginPath();ctx.moveTo(-r*0.6,-r*0.3);ctx.lineTo(-r*0.45,-r*1.3);ctx.lineTo(-r*0.1,-r*0.5);ctx.closePath();ctx.fill();
+      ctx.beginPath();ctx.moveTo(r*0.6,-r*0.3);ctx.lineTo(r*0.45,-r*1.3);ctx.lineTo(r*0.1,-r*0.5);ctx.closePath();ctx.fill();
+      ctx.fillStyle='#f8c';
+      ctx.beginPath();ctx.moveTo(-r*0.5,-r*0.4);ctx.lineTo(-r*0.45,-r*1.0);ctx.lineTo(-r*0.2,-r*0.5);ctx.closePath();ctx.fill();
+      ctx.beginPath();ctx.moveTo(r*0.5,-r*0.4);ctx.lineTo(r*0.45,-r*1.0);ctx.lineTo(r*0.2,-r*0.5);ctx.closePath();ctx.fill();
+    } else if (accId === 13) { // Viking Horns
+      ctx.fillStyle='#ca8';
+      ctx.beginPath();ctx.moveTo(-r*0.5,-r*0.3);ctx.quadraticCurveTo(-r*1.2,-r*1.5,-r*0.8,-r*0.2);ctx.lineTo(-r*0.4,-r*0.5);ctx.closePath();ctx.fill();
+      ctx.beginPath();ctx.moveTo(r*0.5,-r*0.3);ctx.quadraticCurveTo(r*1.2,-r*1.5,r*0.8,-r*0.2);ctx.lineTo(r*0.4,-r*0.5);ctx.closePath();ctx.fill();
+    } else if (accId === 14) { // Fire
+      const cols=['#f80','#f44','#ff0'];
+      for(let i=0;i<5;i++){
+        const a=-Math.PI/2+(Math.random()-0.5)*1.2;
+        const h=r*0.8+Math.random()*r*0.8;
+        ctx.fillStyle=cols[Math.floor(Math.random()*3)];ctx.globalAlpha=0.6;
+        ctx.beginPath();ctx.arc(Math.cos(a)*r*0.3,-r*0.3+Math.sin(a)*h*0.5,r*0.25+Math.random()*r*0.15,0,Math.PI*2);ctx.fill();
+      }
+      ctx.globalAlpha=1;
+    } else if (accId === 15) { // Ice Crown
+      ctx.fillStyle='#aef';ctx.globalAlpha=0.8;
+      ctx.beginPath();
+      ctx.moveTo(-r*0.5,-r*0.5);ctx.lineTo(-r*0.4,-r*1.1);ctx.lineTo(-r*0.15,-r*0.7);
+      ctx.lineTo(0,-r*1.2);ctx.lineTo(r*0.15,-r*0.7);ctx.lineTo(r*0.4,-r*1.1);
+      ctx.lineTo(r*0.5,-r*0.5);ctx.closePath();ctx.fill();
+      ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();ctx.globalAlpha=1;
+    } else if (accId === 16) { // Bandana
+      ctx.fillStyle='#c00';ctx.fillRect(-r*0.8,-r*0.2,r*1.6,r*0.25);
+      ctx.fillStyle='#fff';
+      ctx.beginPath();ctx.arc(0,-r*0.075,r*0.08,0,Math.PI*2);ctx.fill();
+    } else if (accId === 17) { // Stars
+      ctx.fillStyle='#ff0';ctx.globalAlpha=0.8;
+      const starPos=[[-r*0.5,-r*1.2],[r*0.4,-r*1.4],[r*0.1,-r*1.0]];
+      for(const [sx,sy] of starPos){
+        ctx.beginPath();
+        for(let i=0;i<5;i++){
+          const a=i*Math.PI*2/5-Math.PI/2;const ir=r*0.06,or=r*0.15;
+          ctx.lineTo(sx+Math.cos(a)*or,sy+Math.sin(a)*or);
+          const a2=a+Math.PI/5;
+          ctx.lineTo(sx+Math.cos(a2)*ir,sy+Math.sin(a2)*ir);
+        }
+        ctx.closePath();ctx.fill();
+      }
+      ctx.globalAlpha=1;
     }
     ctx.restore();
   }
@@ -212,17 +275,15 @@
     ACCESSORIES.forEach((acc, idx) => {
       const card = document.createElement('div');
       card.className = 'acc-card' + (idx === selectedAccessory ? ' selected' : '');
-      // Mini canvas preview
+      // Mini canvas — accessory only, no head
       const c = document.createElement('canvas');
-      c.width = 50; c.height = 40;
+      c.width = 50; c.height = 50;
       const cx = c.getContext('2d');
-      // Draw mini head with accessory
-      const hr = 12;
-      cx.fillStyle = '#0ff'; cx.beginPath(); cx.arc(25, 25, hr, 0, Math.PI*2); cx.fill();
-      // Eyes
-      cx.fillStyle='#fff';cx.beginPath();cx.arc(21,22,3,0,Math.PI*2);cx.fill();cx.beginPath();cx.arc(29,22,3,0,Math.PI*2);cx.fill();
-      cx.fillStyle='#111';cx.beginPath();cx.arc(21,22,1.5,0,Math.PI*2);cx.fill();cx.beginPath();cx.arc(29,22,1.5,0,Math.PI*2);cx.fill();
-      if (idx > 0) drawAccessory(cx, idx, 25, 25, hr, -Math.PI/2);
+      if (idx === 0) {
+        cx.fillStyle='rgba(255,255,255,0.2)';cx.font='20px sans-serif';cx.textAlign='center';cx.fillText('—',25,30);
+      } else {
+        drawAccessory(cx, idx, 25, 30, 14, -Math.PI/2);
+      }
       card.appendChild(c);
       const nameDiv = document.createElement('div');
       nameDiv.className = 'acc-name'; nameDiv.textContent = acc.name;
@@ -236,6 +297,54 @@
     });
   }
   buildAccessoryGrid();
+
+  // --- Tab switching ---
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  // --- Custom skin creator ---
+  let customColors = ['#00ffff'];
+  const colorPicker = document.getElementById('colorPicker');
+  const addColorBtn = document.getElementById('addColorBtn');
+  const clearColorsBtn = document.getElementById('clearColorsBtn');
+  const applyCustomSkin = document.getElementById('applyCustomSkin');
+  const customColorsDiv = document.getElementById('customColors');
+
+  function renderCustomColors() {
+    customColorsDiv.innerHTML = '';
+    customColors.forEach((c, i) => {
+      const chip = document.createElement('div');
+      chip.style.cssText = `width:32px;height:32px;border-radius:50%;background:${c};border:2px solid rgba(255,255,255,0.2);cursor:pointer;box-shadow:0 0 8px ${c};`;
+      chip.title = 'Click to remove';
+      chip.addEventListener('click', () => { customColors.splice(i, 1); if (customColors.length === 0) customColors.push('#00ffff'); renderCustomColors(); });
+      customColorsDiv.appendChild(chip);
+    });
+  }
+  renderCustomColors();
+
+  addColorBtn.addEventListener('click', () => {
+    if (customColors.length < 8) { customColors.push(colorPicker.value); renderCustomColors(); }
+  });
+  clearColorsBtn.addEventListener('click', () => { customColors = ['#00ffff']; renderCustomColors(); });
+  applyCustomSkin.addEventListener('click', () => {
+    // Add custom skin to SKINS array and select it
+    const name = 'Custom';
+    const existing = SKINS.findIndex(s => s.name === 'Custom');
+    if (existing >= 0) { SKINS[existing].colors = [...customColors]; selectedSkin = existing; }
+    else { SKINS.push({ name, colors: [...customColors] }); selectedSkin = SKINS.length - 1; }
+    buildSkinGrid();
+    // Switch to skins tab
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.querySelector('[data-tab="skinsTab"]').classList.add('active');
+    document.getElementById('skinsTab').classList.add('active');
+  });
 
   // --- Animated skin preview ---
   const skinPreview = document.getElementById('skinPreview');
@@ -251,9 +360,9 @@
     spCtx.fillRect(0, 0, w, h);
 
     const skin = SKINS[selectedSkin] || SKINS[0];
-    const segCount = 14;
-    const spacing = 18;
-    const hr = 10;
+    const segCount = 16;
+    const spacing = 20;
+    const hr = 14;
 
     // Generate a wiggling snake path
     const segs = [];
