@@ -165,7 +165,17 @@
   nameInput.addEventListener('keydown', (e) => { if (e.key==='Enter') startLocalGame(); });
   respawnBtn.addEventListener('click', () => {
     if (gameMode==='local') startLocalGame();
-    else if (gameMode==='multiplayer') startMultiplayerGame(currentRoomId);
+    else if (gameMode==='multiplayer') startMultiplayerGame(currentRoomId, selectedTeamId >= 0 ? selectedTeamId : undefined);
+  });
+
+  // Main menu from death screen
+  const mainMenuBtn = document.getElementById('mainMenuBtn');
+  mainMenuBtn.addEventListener('click', () => {
+    disconnect();
+    gameMode = null; running = false; myId = null; localGame = null;
+    snakes = []; food = []; megaOrbs = []; particles = [];
+    zoom = BASE_ZOOM; lastScore = 0;
+    hideAllScreens(); startScreen.style.display = 'flex';
   });
 
   multiplayerBtn.addEventListener('click', () => {
@@ -301,15 +311,22 @@
   // =====================================================
   // WebSocket (multiplayer mode only)
   // =====================================================
+  let intentionalClose = false;
+
+  function disconnect() {
+    intentionalClose = true;
+    if (ws) { ws.close(); ws = null; }
+  }
+
   function connect(name, roomId, teamId) {
-    if (ws) ws.close();
+    disconnect(); // cleanly close any old connection
+    intentionalClose = false;
     const wsUrl = SERVER_URL.replace('https://','wss://').replace('http://','ws://');
     ws = new WebSocket(`${wsUrl}?room=${encodeURIComponent(roomId)}`);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
       const nameBytes = new TextEncoder().encode(name.substring(0,16));
-      // [0x03][skinIdx][teamId if team mode][name...]
       const hasTeam = teamId !== undefined && teamId >= 0;
       const buf = new Uint8Array((hasTeam ? 3 : 2) + nameBytes.length);
       buf[0]=0x03; buf[1]=selectedSkin;
@@ -332,7 +349,7 @@
       }
       else if (type===0x05) parseLeaderboard(buf);
     };
-    ws.onclose = () => { if(running) setTimeout(()=>connect(name,roomId),2000); };
+    ws.onclose = () => { if(running && !intentionalClose) setTimeout(()=>connect(name,roomId,teamId),2000); };
   }
 
   function parseState(buf) {
@@ -400,6 +417,7 @@
     deathScreen.style.display='flex';
     document.body.style.cursor='default';
     screenShake=15; myId=null; running=false;
+    disconnect(); // cleanly close so no phantom reconnects
   }
 
   function sendDirection() {
@@ -599,7 +617,7 @@
     let shakeX=0,shakeY=0;
     if(screenShake>0){shakeX=(Math.random()-0.5)*screenShake;shakeY=(Math.random()-0.5)*screenShake;screenShake*=0.9;if(screenShake<0.5)screenShake=0;}
     const cx=camera.x+shakeX, cy=camera.y+shakeY;
-    const targetZoom=Math.max(0.35,BASE_ZOOM-Math.min(lastScore/300,0.37));
+    const targetZoom=Math.max(0.48,BASE_ZOOM-Math.min(lastScore/800,0.24));
     zoom+=(targetZoom-zoom)*0.05;
 
     ctx.setTransform(1,0,0,1,0,0);

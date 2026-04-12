@@ -207,10 +207,14 @@ class LocalGame {
   _kill(snake, killer) {
     if(!snake.alive) return;
     snake.alive = false;
+    const dv = Math.max(3, Math.floor(snake.score / Math.max(1, snake.segments.length / 2)));
     for (let i=0;i<snake.segments.length;i+=2) {
       const s=snake.segments[i];
-      this.food.push({x:s.x+(Math.random()-0.5)*20,y:s.y+(Math.random()-0.5)*20,
-        color:snake.color,radius:8+Math.random()*4,value:3+Math.floor(Math.random()*3),tier:2});
+      const r = 10 + Math.min(snake.score/30, 12) + Math.random()*4;
+      const v = dv + Math.floor(Math.random()*3);
+      const t = r>16 ? 5 : r>12 ? 3 : 2;
+      this.food.push({x:s.x+(Math.random()-0.5)*30,y:s.y+(Math.random()-0.5)*30,
+        color:snake.color,radius:r,value:v,tier:t});
     }
     if (snake.id === this.playerId && this.deathCallback) {
       this.deathCallback(snake.score);
