@@ -272,7 +272,9 @@
     disconnect();
     gameMode = null; running = false; myId = null; localGame = null;
     snakes = []; food = []; megaOrbs = []; particles = [];
-    zoom = BASE_ZOOM; lastScore = 0;
+    zoom = BASE_ZOOM; lastScore = 0; displayScore = 0; prevScore = 0;
+    myKills = 0; scorePopups = []; killFeed = [];
+    freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
     hideAllScreens(); startScreen.style.display = 'flex';
   });
 
@@ -491,13 +493,14 @@
       const isBoosting=buf.getUint8(off)===1; off+=1;
       const isBot=buf.getUint8(off)===1; off+=1;
       const teamId=buf.getInt8(off); off+=1;
+      const invincible=buf.getUint8(off)===1; off+=1;
       const score=buf.getUint16(off,true); off+=2;
       const nameLen=buf.getUint8(off); off+=1;
       const name=new TextDecoder().decode(new Uint8Array(buf.buffer,off,nameLen)); off+=nameLen;
       const segCount=buf.getUint16(off,true); off+=2;
       const segments=[];
       for (let j=0;j<segCount;j++) { segments.push({x:buf.getInt16(off,true),y:buf.getInt16(off+2,true)}); off+=4; }
-      newSnakes.push({id,skin,boosting:isBoosting,isBot,teamId,score,name,segments,alive:true});
+      newSnakes.push({id,skin,boosting:isBoosting,isBot,teamId,invincible,score,name,segments,alive:true});
     }
     const foodCount=buf.getUint16(off,true); off+=2;
     const newFood=[];
@@ -538,6 +541,7 @@
       const id=buf.getUint16(off,true); off+=2;
       const score=buf.getUint16(off,true); off+=2;
       const isBot=buf.getUint8(off)===1; off+=1;
+      const kills=buf.getUint8(off); off+=1;
       const teamId=buf.getInt8(off); off+=1;
       const nameLen=buf.getUint8(off); off+=1;
       const name=new TextDecoder().decode(new Uint8Array(buf.buffer,off,nameLen)); off+=nameLen;
@@ -554,17 +558,17 @@
   function onDeath() {
     finalScoreEl.textContent=lastScore;
     screenShake=15;
-    // Death zoom / spectate
+    myId=null;
+    disconnect(); // ALWAYS disconnect immediately — no phantom reconnects
+    // Death zoom / spectate (client-side camera pan only, no server needed)
     if (lastKillerPos) {
       spectateTarget = { x: lastKillerPos.x, y: lastKillerPos.y };
       spectateTimer = 3;
-      // Keep running so the camera pans, but mark player dead
-      myId = null;
+      // running stays true so camera panning works in frame loop
     } else {
       deathScreen.style.display='flex';
       document.body.style.cursor='default';
-      myId=null; running=false;
-      disconnect();
+      running=false;
     }
   }
 
