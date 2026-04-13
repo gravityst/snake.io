@@ -502,6 +502,10 @@
 
   // --- Game state ---
   let snakes = [], food = [], megaOrbs = [], particles = [];
+  let prevSnakes = []; // previous frame snakes for interpolation
+  let interpT = 1; // interpolation factor 0→1 between state updates
+  let prevFood = []; // previous food array for spawn detection
+  let screenFlash = null; // {color, alpha, timer} for mega orb eat flash
   let myId = null, ws = null, localGame = null;
   let gameMode = null; // 'local' | 'multiplayer'
   let currentRoomId = null;
@@ -556,6 +560,24 @@
   // --- Kill counter ---
   let myKills = 0;
   const snakeNameCache = new Map(); // id → name, persists after death
+
+  // --- Settings (persisted in localStorage) ---
+  let showGrid = localStorage.getItem('setting_showGrid') !== 'false';
+  let showParticles = localStorage.getItem('setting_showParticles') !== 'false';
+  let showShake = localStorage.getItem('setting_showShake') !== 'false';
+
+  // --- Death stats tracking ---
+  let lifeStartTime = 0;
+  let foodEaten = 0;
+  let peakScore = 0;
+
+  // --- Emote system ---
+  const EMOTES = ['GG', 'Nice!', 'Watch out', 'LOL', 'RIP', '\u{1F44B}'];
+  let emoteDisplays = []; // [{snakeId, text, timer}]
+  let emoteWheelOpen = false;
+
+  // --- Online count polling ---
+  let onlineCountInterval = null;
 
   // --- Top snake tracking ---
   let topSnakeId = null;
@@ -649,6 +671,7 @@
     disconnect();
     gameMode = null; running = false; myId = null; localGame = null;
     snakes = []; food = []; megaOrbs = []; particles = [];
+    prevSnakes = []; interpT = 1; prevFood = []; screenFlash = null;
     zoom = BASE_ZOOM; lastScore = 0; displayScore = 0; prevScore = 0;
     myKills = 0; scorePopups = []; killFeed = [];
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
@@ -694,13 +717,16 @@
   function startLocalGame() {
     gameMode = 'local';
     myKills = 0; displayScore = 0; prevScore = 0; scorePopups = []; killFeed = [];
+    lifeStartTime = performance.now(); foodEaten = 0; peakScore = 0; emoteDisplays = [];
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
     const name = nameInput.value.trim() || 'Player';
     localGame = new LocalGame(name, selectedSkin);
     myId = localGame.playerId;
     localGame.onPlayerDeath((score) => {
       lastScore = score;
+      if (score > peakScore) peakScore = score;
       finalScoreEl.textContent = score;
+      populateDeathStats();
       deathScreen.style.display = 'flex';
       document.body.style.cursor = 'default';
       screenShake = 15;
@@ -725,7 +751,18 @@
           ? `<span class="mode-badge team">TEAM ${room.teamSize}v${room.teamSize}</span>`
           : `<span class="mode-badge solo">SOLO</span>`;
         const customBadge = room.isCustom ? '<span class="mode-badge custom">CUSTOM</span>' : '';
-        card.innerHTML = `<div class="room-left">${modeBadge}${customBadge}<span class="room-name">${room.name}</span></div><span class="room-players">${room.players}/${room.maxPlayers}</span>`;
+        const copyBtn = (room.isCustom && room.code) ? `<button class="copy-code-btn" data-code="${room.code}">Copy Code</button>` : '';
+        card.innerHTML = `<div class="room-left">${modeBadge}${customBadge}<span class="room-name">${room.name}</span>${copyBtn}</div><span class="room-players">${room.players}/${room.maxPlayers}</span>`;
+        const copyEl = card.querySelector('.copy-code-btn');
+        if (copyEl) {
+          copyEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(copyEl.dataset.code).then(() => {
+              copyEl.textContent = 'Copied!';
+              setTimeout(() => { copyEl.textContent = 'Copy Code'; }, 1500);
+            });
+          });
+        }
         if (room.players < room.maxPlayers) {
           card.addEventListener('click', () => {
             if (roomPollInterval) { clearInterval(roomPollInterval); roomPollInterval=null; }
@@ -775,6 +812,7 @@
   function startMultiplayerGame(roomId, teamId) {
     gameMode = 'multiplayer';
     myKills = 0; displayScore = 0; prevScore = 0; scorePopups = []; killFeed = [];
+    lifeStartTime = performance.now(); foodEaten = 0; peakScore = 0; emoteDisplays = [];
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
     ping = 0; lastPingSent = 0;
     currentRoomId = roomId;
@@ -789,7 +827,103 @@
     roomScreen.style.display='none'; deathScreen.style.display='none';
     teamScreen.style.display='none'; createRoomScreen.style.display='none';
     hud.style.display='none';
+    const sp = document.getElementById('settingsPanel');
+    if (sp) sp.style.display = 'none';
+    closeEmoteWheel();
   }
+
+  // --- Settings panel ---
+  const settingsBtn = document.getElementById('settingsBtn');
+  const settingsPanel = document.getElementById('settingsPanel');
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+      settingsPanel.style.display = settingsPanel.style.display === 'block' ? 'none' : 'block';
+    });
+  }
+  document.querySelectorAll('.setting-toggle').forEach(toggle => {
+    const key = toggle.dataset.setting;
+    const val = key === 'showGrid' ? showGrid : key === 'showParticles' ? showParticles : showShake;
+    toggle.classList.toggle('on', val);
+    toggle.addEventListener('click', () => {
+      const isOn = !toggle.classList.contains('on');
+      toggle.classList.toggle('on', isOn);
+      localStorage.setItem('setting_' + key, isOn);
+      if (key === 'showGrid') showGrid = isOn;
+      else if (key === 'showParticles') showParticles = isOn;
+      else if (key === 'showShake') showShake = isOn;
+    });
+  });
+
+  // --- Emote wheel ---
+  const chatWheel = document.getElementById('chatWheel');
+  const emoteRing = document.getElementById('emoteRing');
+  function buildEmoteWheel() {
+    if (!emoteRing) return;
+    emoteRing.innerHTML = '';
+    const radius = 90;
+    EMOTES.forEach((emote, i) => {
+      const angle = (i / EMOTES.length) * Math.PI * 2 - Math.PI / 2;
+      const btn = document.createElement('button');
+      btn.className = 'emote-btn';
+      btn.textContent = emote;
+      btn.style.left = (Math.cos(angle) * radius - 30) + 'px';
+      btn.style.top = (Math.sin(angle) * radius - 30) + 'px';
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sendEmote(i);
+        closeEmoteWheel();
+      });
+      emoteRing.appendChild(btn);
+    });
+  }
+  buildEmoteWheel();
+
+  function openEmoteWheel() {
+    if (!chatWheel || !running || myId === null) return;
+    emoteWheelOpen = true;
+    chatWheel.style.display = 'block';
+  }
+  function closeEmoteWheel() {
+    if (!chatWheel) return;
+    emoteWheelOpen = false;
+    chatWheel.style.display = 'none';
+  }
+  if (chatWheel) {
+    chatWheel.addEventListener('click', closeEmoteWheel);
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab' && running && myId !== null) {
+      e.preventDefault();
+      if (emoteWheelOpen) closeEmoteWheel();
+      else openEmoteWheel();
+    }
+  });
+
+  function sendEmote(emoteId) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const buf = new Uint8Array(2);
+      buf[0] = 0x07; buf[1] = emoteId;
+      ws.send(buf);
+    }
+    if (myId !== null) {
+      emoteDisplays.push({ snakeId: myId, text: EMOTES[emoteId] || '?', timer: 2 });
+    }
+  }
+
+  // --- Online count polling for start screen ---
+  function pollOnlineCount() {
+    const el = document.getElementById('onlineCount');
+    if (!el) return;
+    fetch(SERVER_URL + '/api/rooms').then(r => r.json()).then(rooms => {
+      let total = 0;
+      for (const room of rooms) total += room.players || 0;
+      el.textContent = total + ' online';
+    }).catch(() => { el.textContent = '-- online'; });
+  }
+  pollOnlineCount();
+  setInterval(() => {
+    if (startScreen.style.display !== 'none') pollOnlineCount();
+  }, 10000);
 
   // =====================================================
   // WebSocket (multiplayer mode only)
@@ -826,7 +960,7 @@
       const buf = new DataView(event.data);
       if (buf.byteLength<1) return;
       const type = buf.getUint8(0);
-      if (type===0x02) myId = buf.getUint16(1,true);
+      if (type===0x02) myId = buf.getUint16(2,true); // [0x02][version u8][id u16]
       else if (type===0x01) parseState(buf);
       else if (type===0x03) { if(buf.getUint16(1,true)===myId) onDeath(); }
       else if (type===0x04) {
@@ -835,7 +969,16 @@
         const killed=snakes.find(s=>s.id===killedId);
         const killer=snakes.find(s=>s.id===killerId);
         if(killed&&killed.segments.length>0) spawnDeathParticles(killed.segments[0].x,killed.segments[0].y,killed.skin);
-        if(killedId===myId) screenShake=15;
+        if(killedId===myId) {
+          screenShake=15;
+          // Ring shockwave on player death
+          if (killed && killed.segments.length > 0) {
+            const hd = killed.segments[0];
+            const ringColor = (SKINS[killed.skin]||SKINS[0]).colors[0];
+            particles.push({ type:'ring', x:hd.x, y:hd.y, vx:0, vy:0, radius:10, expandSpeed:300, life:1, decay:1.2, size:0, color:ringColor });
+            particles.push({ type:'ring', x:hd.x, y:hd.y, vx:0, vy:0, radius:5, expandSpeed:200, life:1, decay:1.5, size:0, color:'#fff' });
+          }
+        }
         // Kill feed
         const killerName = killer ? killer.name : (snakeNameCache.get(killerId) || '???');
         const killedName = killed ? killed.name : (snakeNameCache.get(killedId) || '???');
@@ -851,6 +994,15 @@
         }
       }
       else if (type===0x05) parseLeaderboard(buf);
+      else if (type===0x07) {
+        if (buf.byteLength >= 4) {
+          const eSnakeId = buf.getUint16(1, true);
+          const eId = buf.getUint8(3);
+          if (eSnakeId !== myId && eId < EMOTES.length) {
+            emoteDisplays.push({ snakeId: eSnakeId, text: EMOTES[eId], timer: 2 });
+          }
+        }
+      }
     };
     ws.onclose = () => {
       // Only auto-reconnect if this is still the active connection
@@ -892,6 +1044,33 @@
       newMega.push({x:buf.getInt16(off,true),y:buf.getInt16(off+2,true),color:buf.getUint8(off+4),radius:buf.getUint8(off+5),value:buf.getUint8(off+6)});
       off+=7;
     }
+    // --- Interpolation: store previous snakes, reset interpT ---
+    prevSnakes = snakes;
+    interpT = 0;
+    // --- Screen flash on mega orb eat (score jump >= 40) ---
+    const me0 = snakes.find(s => s.id === myId);
+    const me1 = newSnakes.find(s => s.id === myId);
+    if (me0 && me1 && me1.score - me0.score >= 40) {
+      // Find nearest mega orb color
+      let flashColor = '#fff';
+      if (me1.segments.length > 0) {
+        let minD = Infinity;
+        for (const m of megaOrbs) {
+          const dx = m.x - me1.segments[0].x, dy = m.y - me1.segments[0].y;
+          const d = dx * dx + dy * dy;
+          if (d < minD) { minD = d; flashColor = COLORS[m.color] || '#fff'; }
+        }
+      }
+      screenFlash = { color: flashColor, alpha: 0.3, timer: 0.3 };
+    }
+    // --- Food spawn-in animation: tag new food with spawnTime ---
+    const prevFoodSet = new Set(prevFood.map(f => f.x + ',' + f.y));
+    for (const f of newFood) {
+      if (!prevFoodSet.has(f.x + ',' + f.y)) {
+        f.spawnTime = animTime;
+      }
+    }
+    prevFood = newFood;
     snakes=newSnakes; food=newFood; megaOrbs=newMega;
     // Cache snake names for kill feed (names persist after death)
     for (const s of newSnakes) snakeNameCache.set(s.id, s.name);
@@ -911,7 +1090,9 @@
         const head = me.segments[0];
         const skin = SKINS[me.skin] || SKINS[0];
         scorePopups.push({ x: head.x, y: head.y - 30, text: '+' + diff, color: skin.colors[0], life: 1.0 });
+        foodEaten++;
       }
+      if (me.score > peakScore) peakScore = me.score;
       prevScore = me.score;
       myScoreEl.textContent=`Score: ${me.score}`;
       lastScore=me.score;
@@ -939,8 +1120,22 @@
     playerCountEl.textContent=`Players: ${snakes.length}`;
   }
 
+  function populateDeathStats() {
+    const elapsed = Math.floor((performance.now() - lifeStartTime) / 1000);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    const timeStr = mins + ':' + (secs < 10 ? '0' : '') + secs;
+    const el = (id) => document.getElementById(id);
+    if (el('statTime')) el('statTime').textContent = timeStr;
+    if (el('statFood')) el('statFood').textContent = foodEaten;
+    if (el('statKills')) el('statKills').textContent = myKills;
+    if (el('statPeak')) el('statPeak').textContent = peakScore;
+  }
+
   function onDeath() {
     finalScoreEl.textContent=lastScore;
+    if (lastScore > peakScore) peakScore = lastScore;
+    populateDeathStats();
     screenShake=15;
     myId=null;
     disconnect(); // ALWAYS disconnect immediately — no phantom reconnects
@@ -968,17 +1163,29 @@
 
   // --- Particles ---
   function spawnDeathParticles(x,y,skinIdx) {
+    if (!showParticles) return;
     const color=(SKINS[skinIdx]||SKINS[0]).colors[0];
     for(let i=0;i<40;i++){const a=Math.random()*Math.PI*2,s=50+Math.random()*200;
     particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,decay:0.5+Math.random(),size:3+Math.random()*6,color});}
   }
   function spawnEatParticles(x,y,skinIdx) {
+    if (!showParticles) return;
     const color=(SKINS[skinIdx]||SKINS[0]).colors[0];
     for(let i=0;i<6;i++){const a=Math.random()*Math.PI*2,s=30+Math.random()*80;
     particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,decay:1.5+Math.random()*1.5,size:2+Math.random()*3,color});}
   }
   function updateParticles(dt) {
-    for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=0.96;p.vy*=0.96;p.life-=p.decay*dt;if(p.life<=0)particles.splice(i,1);}
+    for(let i=particles.length-1;i>=0;i--){
+      const p=particles[i];
+      if (p.type === 'ring') {
+        // Ring shockwave: expand radius, fade out
+        p.radius += p.expandSpeed * dt;
+        p.life -= p.decay * dt;
+      } else {
+        p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=0.96;p.vy*=0.96;p.life-=p.decay*dt;
+      }
+      if(p.life<=0)particles.splice(i,1);
+    }
   }
 
   // =====================================================
@@ -1006,7 +1213,14 @@
     for(const f of food){
       const sx=f.x-cx+midX,sy=f.y-cy+midY;
       if(sx<midX-halfW||sx>midX+halfW||sy<midY-halfH||sy>midY+halfH) continue;
-      const tier=f.tier||0,pulse=0.9+0.1*Math.sin(animTime*3+f.x*0.01),r=f.radius*pulse;
+      const tier=f.tier||0,pulse=0.9+0.1*Math.sin(animTime*3+f.x*0.01);
+      let spawnScale = 1;
+      if (f.spawnTime !== undefined && animTime - f.spawnTime < 0.3) {
+        const t = animTime - f.spawnTime;
+        spawnScale = Math.min(1, (t / 0.3) * 1.2 - 0.2 * Math.sin(t / 0.3 * Math.PI));
+        spawnScale = Math.max(0, spawnScale);
+      }
+      const r=f.radius*pulse*spawnScale;
       const color=COLORS[f.color]||COLORS[0];
       if(tier>=4){ctx.fillStyle=color;ctx.globalAlpha=0.12;ctx.beginPath();ctx.arc(sx,sy,r*2,0,Math.PI*2);ctx.fill();}
       ctx.fillStyle=color;ctx.globalAlpha=0.9;ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.fill();
@@ -1034,24 +1248,80 @@
   }
 
   function drawSnake(snake,cx,cy) {
-    const segs=snake.segments; if(segs.length<2) return;
+    const rawSegs=snake.segments; if(rawSegs.length<2) return;
+
+    // --- Interpolation: lerp between prevSnakes and current snakes ---
+    const prev = prevSnakes.find(s => s.id === snake.id);
+    const segs = [];
+    for (let i = 0; i < rawSegs.length; i++) {
+      if (prev && prev.segments[i]) {
+        const ps = prev.segments[i], cs = rawSegs[i];
+        segs.push({
+          x: ps.x + (cs.x - ps.x) * Math.min(interpT, 1),
+          y: ps.y + (cs.y - ps.y) * Math.min(interpT, 1)
+        });
+      } else {
+        segs.push({ x: rawSegs[i].x, y: rawSegs[i].y });
+      }
+    }
+
     const headColor=getSegColor(snake,0);
     const thickness=getThickness(snake);
     const dotR=DOT_RADIUS*thickness, headR=HEAD_RADIUS*thickness;
     const halfW=canvas.width/(2*zoom)+80,halfH=canvas.height/(2*zoom)+80;
     const midX=canvas.width/2,midY=canvas.height/2;
+    const score = snake.score;
     ctx.shadowBlur=0;
     for(let i=segs.length-1;i>=1;i--){
       const seg=segs[i],sx=seg.x-cx+midX,sy=seg.y-cy+midY;
       if(sx<midX-halfW||sx>midX+halfW||sy<midY-halfH||sy>midY+halfH) continue;
-      const tailT=i/segs.length,r=dotR*(1-tailT*0.35);
+      const tailT=i/segs.length;
+      let r=dotR*(1-tailT*0.35);
+      // Evolution: score>=2000 body dots pulse gently (+-5%)
+      if (score >= 2000) r *= 1 + 0.05 * Math.sin(animTime * 4 + i * 0.3);
       ctx.fillStyle=getSegColor(snake,i);ctx.globalAlpha=0.95;ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.fill();
+      // Evolution: score>=500 white rim on body dots
+      if (score >= 500) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.stroke();
+      }
     }
     ctx.globalAlpha=1;
     const head=segs[0],hx=head.x-cx+canvas.width/2,hy=head.y-cy+canvas.height/2;
     const angle=Math.atan2(head.y-segs[1].y,head.x-segs[1].x);
+    // Evolution: score>=200 faint outer glow ring around head
+    if (score >= 200) {
+      ctx.fillStyle = headColor;
+      ctx.globalAlpha = 0.12;
+      ctx.beginPath(); ctx.arc(hx, hy, headR * 1.6, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
     if(snake.id===myId){ctx.shadowColor=headColor;ctx.shadowBlur=snake.boosting?30:15;}
     ctx.fillStyle=headColor;ctx.beginPath();ctx.arc(hx,hy,headR,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+    // Evolution: score>=5000 lens flare on head (two crossed lines)
+    if (score >= 5000) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = 1.5;
+      const flareR = headR * 1.4;
+      ctx.beginPath();
+      ctx.moveTo(hx - flareR, hy); ctx.lineTo(hx + flareR, hy);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(hx, hy - flareR); ctx.lineTo(hx, hy + flareR);
+      ctx.stroke();
+    }
+    // Evolution: score>=1000 tiny orbiting particle around head
+    if (score >= 1000) {
+      const orbitA = animTime * 2; // 2 rad/s
+      const orbitR = headR * 1.8;
+      const ox = hx + Math.cos(orbitA) * orbitR;
+      const oy = hy + Math.sin(orbitA) * orbitR;
+      ctx.fillStyle = '#fff';
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath(); ctx.arc(ox, oy, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
     const eyeOff=headR*0.5,eyeR=headR*0.28,perp=angle+Math.PI/2;
     // Eye tracking: player's snake looks toward mouse cursor
     const pupilAngle = (snake.id===myId) ? Math.atan2(mouseY-hy,mouseX-hx) : angle;
@@ -1065,6 +1335,7 @@
     if(snake.id===topSnakeId) drawCrown(hx, hy, headR);
     // Accessory
     if(snake.accessory > 0) drawAccessory(ctx, snake.accessory, hx, hy, headR, angle);
+    // Boost trail: use CURRENT interpolated tail position
     if(snake.boosting&&segs.length>2&&Math.random()<0.4){const tail=segs[segs.length-1];spawnEatParticles(tail.x,tail.y,snake.skin);}
     // Name + AI badge
     ctx.font='bold 13px "Segoe UI",sans-serif';ctx.textAlign='center';
@@ -1082,6 +1353,26 @@
       ctx.fillStyle='#0ff';ctx.textAlign='center';ctx.fillText('AI',bx,by+4);
     }
     if(snake.score>0){ctx.font='11px "Segoe UI",sans-serif';ctx.fillStyle='rgba(255,255,255,0.4)';ctx.textAlign='center';ctx.fillText(snake.score,hx,hy-headR-5);}
+    // Emote display above snake
+    for (const em of emoteDisplays) {
+      if (em.snakeId === snake.id) {
+        const alpha = Math.min(em.timer, 1);
+        const floatY = hy - headR - 40 - (2 - em.timer) * 15;
+        ctx.globalAlpha = alpha;
+        ctx.font = 'bold 15px "Segoe UI",sans-serif';
+        ctx.textAlign = 'center';
+        // Background pill
+        const tw = ctx.measureText(em.text).width;
+        ctx.fillStyle = 'rgba(0,20,40,0.7)';
+        ctx.beginPath();
+        ctx.arc(hx - tw/2 - 8, floatY - 5, 12, Math.PI*0.5, Math.PI*1.5);
+        ctx.arc(hx + tw/2 + 8, floatY - 5, 12, Math.PI*1.5, Math.PI*0.5);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText(em.text, hx, floatY);
+        ctx.globalAlpha = 1;
+      }
+    }
   }
 
   function drawParticles(cx,cy) {
@@ -1090,7 +1381,15 @@
     for(const p of particles){
       const sx=p.x-cx+midX,sy=p.y-cy+midY;
       if(sx<midX-halfW||sx>midX+halfW||sy<midY-halfH||sy>midY+halfH) continue;
-      ctx.globalAlpha=p.life;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(sx,sy,p.size*p.life,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=p.life;
+      if (p.type === 'ring') {
+        // Ring shockwave: expanding circle stroke
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 2 * p.life;
+        ctx.beginPath(); ctx.arc(sx, sy, p.radius, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(sx,sy,p.size*p.life,0,Math.PI*2);ctx.fill();
+      }
     }
     ctx.globalAlpha=1;ctx.shadowBlur=0;
   }
@@ -1245,6 +1544,15 @@
     const dt = Math.min((now-lastFrame)/1000, 0.05);
     lastFrame = now; animTime += dt;
 
+    // Advance interpolation factor toward 1
+    interpT += dt / 0.033;
+
+    // Update screen flash
+    if (screenFlash) {
+      screenFlash.timer -= dt;
+      if (screenFlash.timer <= 0) screenFlash = null;
+    }
+
     // Freeze frame on kill — skip game updates but still render
     let gameDt = dt;
     if (freezeTimer > 0) { freezeTimer -= dt; gameDt = 0; }
@@ -1281,8 +1589,18 @@
           : Math.atan2(mouseY-canvas.height/2, mouseX-canvas.width/2);
         localGame.setPlayerInput(angle, boosting);
         localGame.tick(gameDt);
+        prevSnakes = snakes;
         snakes = localGame.snakes.filter(s => s.alive);
-        food = localGame.food;
+        // Tag new food with spawnTime for spawn-in animation
+        const localNewFood = localGame.food;
+        const localPrevFoodSet = new Set(prevFood.map(f => f.x + ',' + f.y));
+        for (const f of localNewFood) {
+          if (!localPrevFoodSet.has(f.x + ',' + f.y) && f.spawnTime === undefined) {
+            f.spawnTime = animTime;
+          }
+        }
+        prevFood = localNewFood;
+        food = localNewFood;
         megaOrbs = localGame.megaOrbs;
         const me = localGame.snakes.find(s => s.id === myId);
         if (me && me.alive) {
@@ -1294,7 +1612,20 @@
             const head = me.segments[0];
             const skin = SKINS[me.skin] || SKINS[0];
             scorePopups.push({ x: head.x, y: head.y - 30, text: '+' + diff, color: skin.colors[0], life: 1.0 });
+            foodEaten++;
+            // Screen flash on mega orb eat (score jump >= 40)
+            if (diff >= 40 && head) {
+              let flashColor = '#fff';
+              let minD = Infinity;
+              for (const m of megaOrbs) {
+                const dx = m.x - head.x, dy = m.y - head.y;
+                const d = dx * dx + dy * dy;
+                if (d < minD) { minD = d; flashColor = COLORS[m.color] || '#fff'; }
+              }
+              screenFlash = { color: flashColor, alpha: 0.3, timer: 0.3 };
+            }
           }
+          if (me.score > peakScore) peakScore = me.score;
           prevScore = me.score;
           myScoreEl.textContent = `Score: ${Math.round(displayScore)} | Kills: ${myKills}`;
           lastScore = me.score;
@@ -1316,9 +1647,14 @@
     }
 
     updateParticles(dt);
+    // Update emote timers
+    for (let i = emoteDisplays.length - 1; i >= 0; i--) {
+      emoteDisplays[i].timer -= dt;
+      if (emoteDisplays[i].timer <= 0) emoteDisplays.splice(i, 1);
+    }
 
     let shakeX=0,shakeY=0;
-    if(screenShake>0){shakeX=(Math.random()-0.5)*screenShake;shakeY=(Math.random()-0.5)*screenShake;screenShake*=0.9;if(screenShake<0.5)screenShake=0;}
+    if(screenShake>0){if(showShake){shakeX=(Math.random()-0.5)*screenShake;shakeY=(Math.random()-0.5)*screenShake;}screenShake*=0.9;if(screenShake<0.5)screenShake=0;}
     const cx=camera.x+shakeX, cy=camera.y+shakeY;
     // Logarithmic zoom — gradual, never jarring. 0→0.72, 500→0.60, 2000→0.52, 10000→0.44
     const targetZoom=Math.max(0.38, BASE_ZOOM - 0.08 * Math.log10(1 + lastScore / 50));
@@ -1332,13 +1668,21 @@
 
     ctx.save();
     ctx.translate(canvas.width/2,canvas.height/2);ctx.scale(zoom,zoom);ctx.translate(-canvas.width/2,-canvas.height/2);
-    drawStars(cx,cy); drawGrid(cx,cy); drawBorder(cx,cy); drawFood(cx,cy); drawMegaOrbs(cx,cy);
+    drawStars(cx,cy); if(showGrid) drawGrid(cx,cy); drawBorder(cx,cy); drawFood(cx,cy); drawMegaOrbs(cx,cy);
     const me=snakes.find(s=>s.id===myId);
     for(const snake of snakes){if(snake.alive&&snake.id!==myId)drawSnake(snake,cx,cy);}
     if(me&&me.alive) drawSnake(me,cx,cy);
     drawParticles(cx,cy);
     drawScorePopups(cx, cy, dt);
     ctx.restore();
+
+    // Screen flash effect (mega orb eat)
+    if (screenFlash) {
+      ctx.globalAlpha = screenFlash.alpha * (screenFlash.timer / 0.3);
+      ctx.fillStyle = screenFlash.color;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1;
+    }
 
     if(running){
       ctx.strokeStyle='rgba(255,255,255,0.6)';ctx.lineWidth=1.5;const cr=12;

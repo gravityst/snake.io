@@ -69,6 +69,7 @@ class Room {
     this.bots = [];
     this.nextSnakeId = 1;
     this.clients = new Map(); // ws → snakeId
+    this.disconnected = new Map(); // name → snakeId
 
     this.spawnFood();
     this.spawnMegaOrbs();
@@ -99,6 +100,16 @@ class Room {
     return { x: Math.cos(a)*r, y: Math.sin(a)*r };
   }
   _thickness(s) { return 1 + 0.6 * Math.log10(1 + s.score / 50); }
+  _buildFoodGrid() {
+    this.foodGrid = new Map();
+    for (let i = 0; i < this.food.length; i++) {
+      const f = this.food[i];
+      const key = Math.floor(f.x / 500) + ',' + Math.floor(f.y / 500);
+      let bucket = this.foodGrid.get(key);
+      if (!bucket) { bucket = []; this.foodGrid.set(key, bucket); }
+      bucket.push(i);
+    }
+  }
   _randomSkill() {
     const adv = this.bots.filter(id => { const s=this.snakes.get(id); return s&&s.alive&&s.skill===SKILL_ADVANCED; }).length;
     const r = Math.random();
@@ -172,22 +183,36 @@ class Room {
     if (this.clients.has(ws)) return;
     if (this.realPlayerCount >= MAX_PLAYERS_PER_ROOM) return;
 
-    const snake = this._createSnake(name, false, skinIdx, SKILL_BEGINNER, accessory || 0);
+    let snake;
+    // Check for a disconnected snake with the same name to reconnect
+    const dcId = this.disconnected.get(name);
+    if (dcId !== undefined) {
+      const dcSnake = this.snakes.get(dcId);
+      if (dcSnake && dcSnake.alive) {
+        snake = dcSnake;
+        delete snake.disconnectTime;
+        this.disconnected.delete(name);
+      }
+    }
 
-    // Team assignment
-    if (this.mode === 'team' && this.teams.has(teamId)) {
-      const team = this.teams.get(teamId);
-      if (team.memberIds.size < this.teamSize + 10) { // allow some overflow for bots
-        snake.teamId = teamId;
-        team.memberIds.add(snake.id);
+    if (!snake) {
+      snake = this._createSnake(name, false, skinIdx, SKILL_BEGINNER, accessory || 0);
+
+      // Team assignment
+      if (this.mode === 'team' && this.teams.has(teamId)) {
+        const team = this.teams.get(teamId);
+        if (team.memberIds.size < this.teamSize + 10) { // allow some overflow for bots
+          snake.teamId = teamId;
+          team.memberIds.add(snake.id);
+        }
       }
     }
 
     this.clients.set(ws, snake.id);
 
-    // Welcome: [0x02][yourId u16]
-    const welcome = Buffer.alloc(3);
-    welcome[0]=0x02; welcome.writeUInt16LE(snake.id,1);
+    // Welcome: [0x02][version u8][yourId u16]
+    const welcome = Buffer.alloc(4);
+    welcome[0]=0x02; welcome[1]=1; welcome.writeUInt16LE(snake.id,2);
     ws.send(welcome);
 
     // Send team info: [0x06][teamCount u8][per team: id u8, colorLen u8, color, nameLen u8, name]
@@ -220,11 +245,17 @@ class Room {
     const playerId = this.clients.get(ws);
     if (playerId===undefined) return;
     const snake = this.snakes.get(playerId);
-    if (snake && snake.teamId >= 0) {
-      const team = this.teams.get(snake.teamId);
-      if (team) team.memberIds.delete(playerId);
+    if (snake && snake.alive && !snake.isBot) {
+      // Mark as disconnected for potential reconnect instead of killing
+      snake.disconnectTime = Date.now();
+      this.disconnected.set(snake.name, playerId);
+    } else if (snake) {
+      if (snake.teamId >= 0) {
+        const team = this.teams.get(snake.teamId);
+        if (team) team.memberIds.delete(playerId);
+      }
+      this.killSnake(playerId, null, true);
     }
-    this.killSnake(playerId, null, true);
     this.clients.delete(ws);
     this.adjustBots();
   }
@@ -292,10 +323,11 @@ class Room {
     const snake=this.snakes.get(id);
     if(!snake||!snake.alive) return;
     snake.alive=false;
-    // Drop food from body — every 3rd segment, capped to prevent food floods
-    const dropStep = Math.max(3, Math.floor(snake.segments.length / 15)); // at most ~15 drops
+    // Drop food from body — every 3rd segment, capped to max 10 drops
+    const dropStep = Math.max(3, Math.floor(snake.segments.length / 15));
+    const dropLimit = Math.min(10, Math.floor(snake.segments.length / dropStep));
     const dropValue = Math.max(2, Math.floor(snake.score / 20));
-    for(let i=0;i<snake.segments.length && this.food.length<MAX_FOOD;i+=dropStep){
+    for(let i=0,count=0;i<snake.segments.length && this.food.length<MAX_FOOD && count<dropLimit;i+=dropStep,count++){
       const s=snake.segments[i];
       const r = 8 + Math.min(snake.score / 50, 8) + Math.random() * 3;
       const v = dropValue + Math.floor(Math.random() * 3);
@@ -344,8 +376,19 @@ class Room {
     const dt=Math.min((now-this.lastTick)/1000,0.05);
     this.lastTick=now;
     this.tickCount++;
+    // Clean up disconnected snakes after 10 seconds
+    for (const [name, snakeId] of this.disconnected) {
+      const s = this.snakes.get(snakeId);
+      if (!s || !s.alive) { this.disconnected.delete(name); continue; }
+      if (now - s.disconnectTime > 10000) {
+        this.disconnected.delete(name);
+        if (s.teamId >= 0) { const t = this.teams.get(s.teamId); if (t) t.memberIds.delete(snakeId); }
+        this.killSnake(snakeId, null, true);
+      }
+    }
     this.updateMegaOrbs(dt);
     for(const [,s] of this.snakes){if(s.isBot&&s.alive) this._botAI(s,dt);}
+    this._buildFoodGrid();
     for(const [,s] of this.snakes){if(s.alive) this._updateSnake(s,dt);}
     this._checkCollisions();
     this.spawnFood(); this.spawnMegaOrbs();
@@ -380,11 +423,19 @@ class Room {
       }
     }
     const headR=HEAD_RADIUS*this._thickness(snake),eatR=headR+30;
-    for(let i=this.food.length-1;i>=0;i--){
-      const f=this.food[i],dx=f.x-head.x;if(dx>eatR||dx<-eatR)continue;
-      const dy=f.y-head.y;if(dy>eatR||dy<-eatR)continue;
-      if(dx*dx+dy*dy<(headR+f.radius)**2){this.food.splice(i,1);snake.score+=f.value||1;}
-    }
+    const gx=Math.floor(head.x/500),gy=Math.floor(head.y/500);
+    const eaten=[];
+    for(let dx=-1;dx<=1;dx++){for(let dy=-1;dy<=1;dy++){
+      const bucket=this.foodGrid.get((gx+dx)+','+(gy+dy));
+      if(!bucket)continue;
+      for(const idx of bucket){
+        const f=this.food[idx];if(!f)continue;
+        const fx=f.x-head.x;if(fx>eatR||fx<-eatR)continue;
+        const fy=f.y-head.y;if(fy>eatR||fy<-eatR)continue;
+        if(fx*fx+fy*fy<(headR+f.radius)**2){eaten.push(idx);snake.score+=f.value||1;}
+      }
+    }}
+    if(eaten.length){eaten.sort((a,b)=>b-a);for(const idx of eaten)this.food.splice(idx,1);}
     for(let i=this.megaOrbs.length-1;i>=0;i--){
       const m=this.megaOrbs[i],dx=head.x-m.x,dy=head.y-m.y;
       if(dx*dx+dy*dy<(headR+m.radius)**2){this.megaOrbs.splice(i,1);snake.score+=m.value;}
