@@ -816,7 +816,7 @@
     myKills = 0; displayScore = 0; prevScore = 0; scorePopups = []; killFeed = [];
     lifeStartTime = performance.now(); foodEaten = 0; peakScore = 0; emoteDisplays = [];
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
-    ping = 0; lastPingSent = 0;
+    ping = 0; smoothPing = 0; lastPingSent = 0; lastStateTime = 0;
     currentRoomId = roomId;
     selectedTeamId = teamId ?? -1;
     const name = nameInput.value.trim() || 'Player';
@@ -1076,15 +1076,17 @@
     snakes=newSnakes; food=newFood; megaOrbs=newMega;
     // Cache snake names for kill feed (names persist after death)
     for (const s of newSnakes) snakeNameCache.set(s.id, s.name);
-    // Track state arrival interval (measures actual server→client latency)
+    // Track state arrival interval
     const now = performance.now();
     if (lastStateTime > 0) {
       const interval = now - lastStateTime;
-      // Server sends at 33ms intervals. Deviation from 33ms indicates lag.
-      const jitter = Math.abs(interval - 33);
-      const rawPing = Math.max(5, jitter + 10); // approximate — jitter correlates with latency
-      smoothPing = smoothPing === 0 ? rawPing : smoothPing * 0.92 + rawPing * 0.08;
-      ping = smoothPing;
+      // Ignore absurd intervals (connection switch, tab unfocus, etc)
+      if (interval < 500) {
+        const jitter = Math.abs(interval - 33);
+        const rawPing = Math.max(5, Math.min(jitter + 10, 200));
+        smoothPing = (smoothPing < 5 || smoothPing > 1000) ? rawPing : smoothPing * 0.9 + rawPing * 0.1;
+        ping = smoothPing;
+      }
     }
     lastStateTime = now;
     const me=snakes.find(s=>s.id===myId);
