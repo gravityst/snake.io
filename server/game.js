@@ -5,8 +5,8 @@ const WebSocket = require('ws');
 // =====================================================
 
 const MAP_SIZE = 14000;
-const FOOD_COUNT = 800;
-const MAX_FOOD = 1200; // hard cap including kill drops
+const FOOD_COUNT = 500;
+const MAX_FOOD = 800;
 const SNAKE_SPEED = 280;
 const BOOST_SPEED = 500;
 const SEGMENT_SPACING = 24;
@@ -14,11 +14,11 @@ const DOT_RADIUS = 9;
 const INITIAL_LENGTH = 10;
 const HEAD_RADIUS = 14;
 const BOOST_SHRINK_RATE = 2.5;
-const MAX_BOTS = 12;
-const MEGA_ORB_COUNT = 10;
+const MAX_BOTS = 8;
+const MEGA_ORB_COUNT = 6;
 const TICK_RATE = 20;
 const TICK_MS = 1000 / TICK_RATE;
-const BROADCAST_RATE = 15;
+const BROADCAST_RATE = 12;
 const BROADCAST_MS = 1000 / BROADCAST_RATE;
 const MAX_ADVANCED_BOTS = 2;
 const MAX_PLAYERS_PER_ROOM = 30;
@@ -77,11 +77,30 @@ class Room {
 
     this.lastTick = Date.now();
     this.tickCount = 0;
+    this.tickInterval = null;
+    this.broadcastInterval = null;
+    this.running = false;
+    // Only start ticking when players join (saves CPU for empty rooms)
+  }
+
+  _startLoop() {
+    if (this.running) return;
+    this.running = true;
+    this.lastTick = Date.now();
     this.tickInterval = setInterval(() => this.tick(), TICK_MS);
     this.broadcastInterval = setInterval(() => {
       this.broadcastState();
       this.broadcastLeaderboard();
     }, BROADCAST_MS);
+  }
+
+  _stopLoop() {
+    if (!this.running) return;
+    this.running = false;
+    clearInterval(this.tickInterval);
+    clearInterval(this.broadcastInterval);
+    this.tickInterval = null;
+    this.broadcastInterval = null;
   }
 
   destroy() {
@@ -209,6 +228,7 @@ class Room {
     }
 
     this.clients.set(ws, snake.id);
+    this._startLoop(); // wake up room when player joins
 
     // Welcome: [0x02][version u8][yourId u16]
     const welcome = Buffer.alloc(4);
@@ -258,6 +278,7 @@ class Room {
     }
     this.clients.delete(ws);
     this.adjustBots();
+    if (this.clients.size === 0) this._stopLoop(); // sleep empty rooms
   }
 
   adjustBots() {
