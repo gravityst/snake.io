@@ -5,8 +5,8 @@ const WebSocket = require('ws');
 // =====================================================
 
 const MAP_SIZE = 14000;
-const FOOD_COUNT = 1200;
-const MAX_FOOD = 2000; // hard cap including kill drops
+const FOOD_COUNT = 800;
+const MAX_FOOD = 1200; // hard cap including kill drops
 const SNAKE_SPEED = 280;
 const BOOST_SPEED = 500;
 const SEGMENT_SPACING = 24;
@@ -14,11 +14,11 @@ const DOT_RADIUS = 9;
 const INITIAL_LENGTH = 10;
 const HEAD_RADIUS = 14;
 const BOOST_SHRINK_RATE = 2.5;
-const MAX_BOTS = 15;
-const MEGA_ORB_COUNT = 12;
-const TICK_RATE = 30;
+const MAX_BOTS = 12;
+const MEGA_ORB_COUNT = 10;
+const TICK_RATE = 20;
 const TICK_MS = 1000 / TICK_RATE;
-const BROADCAST_RATE = 30;
+const BROADCAST_RATE = 15;
 const BROADCAST_MS = 1000 / BROADCAST_RATE;
 const MAX_ADVANCED_BOTS = 2;
 const MAX_PLAYERS_PER_ROOM = 30;
@@ -567,7 +567,7 @@ class Room {
       if(ws.readyState!==WebSocket.OPEN)continue;
       const mySnake=this.snakes.get(playerId);
       if(!mySnake||!mySnake.alive)continue;
-      const cx=mySnake.segments[0].x,cy=mySnake.segments[0].y,viewRange=1800;
+      const cx=mySnake.segments[0].x,cy=mySnake.segments[0].y,viewRange=1400;
       const visSnakes=[],visFood=[],visMega=[];
       for(const [,snake] of this.snakes){
         if(!snake.alive)continue;

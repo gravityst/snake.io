@@ -1082,7 +1082,7 @@
       const interval = now - lastStateTime;
       // Ignore absurd intervals (connection switch, tab unfocus, etc)
       if (interval < 500) {
-        const jitter = Math.abs(interval - 33);
+        const jitter = Math.abs(interval - 67); // server broadcasts at 15Hz (67ms)
         const rawPing = Math.max(5, Math.min(jitter + 10, 200));
         smoothPing = (smoothPing < 5 || smoothPing > 1000) ? rawPing : smoothPing * 0.9 + rawPing * 0.1;
         ping = smoothPing;
@@ -1553,7 +1553,7 @@
     lastFrame = now; animTime += dt;
 
     // Advance interpolation factor toward 1
-    interpT += dt / 0.033;
+    interpT += dt / 0.067; // server broadcasts at 15Hz (67ms)
 
     // Update screen flash
     if (screenFlash) {
@@ -1650,7 +1650,7 @@
         playerCountEl.textContent=`Players: ${localGame.snakes.filter(s=>s.alive).length}`;
       } else if (gameMode==='multiplayer') {
         sendTimer += gameDt;
-        if (sendTimer >= 0.033) { sendDirection(); sendTimer = 0; }
+        if (sendTimer >= 0.05) { sendDirection(); sendTimer = 0; } // 20Hz input
       }
     }
 
