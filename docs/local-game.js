@@ -58,7 +58,7 @@ class LocalGame {
     return { x: Math.cos(a) * r, y: Math.sin(a) * r };
   }
 
-  _thickness(snake) { return 1 + Math.sqrt(snake.score) / 45; }
+  _thickness(snake) { return 1 + Math.sqrt(snake.score) / 45 + snake.score / 8000; }
 
   _randomSkill() {
     const r = Math.random();
@@ -157,7 +157,7 @@ class LocalGame {
       const dist=Math.sqrt(dx*dx+dy*dy), t=this.SEGMENT_SPACING/dist;
       snake.segments.splice(1,0,{x:snake.segments[1].x+dx*t, y:snake.segments[1].y+dy*t});
     }
-    const tl = this.INITIAL_LENGTH + Math.floor(1.2*Math.sqrt(snake.score));
+    const tl = this.INITIAL_LENGTH + Math.floor(1.2*Math.sqrt(snake.score)+snake.score/100);
     while (snake.segments.length > tl) snake.segments.pop();
     if (snake.boosting && snake.score > 0) {
       snake.boostAccum += this.BOOST_SHRINK_RATE*dt;
