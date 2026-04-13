@@ -504,6 +504,8 @@
   let snakes = [], food = [], megaOrbs = [], particles = [];
   let prevSnakes = []; // previous frame snakes for interpolation
   let interpT = 1; // interpolation factor 0→1 between state updates
+  // Continuously-smoothed display positions (per-snake, per-segment)
+  const displaySegs = new Map(); // snakeId → array of {x, y}
   let prevFood = []; // previous food array for spawn detection
   let screenFlash = null; // {color, alpha, timer} for mega orb eat flash
   let myId = null, ws = null, localGame = null;
@@ -817,6 +819,7 @@
     lifeStartTime = performance.now(); foodEaten = 0; peakScore = 0; emoteDisplays = [];
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
     ping = 0; smoothPing = 0; lastPingSent = 0; lastStateTime = 0;
+    displaySegs.clear();
     currentRoomId = roomId;
     selectedTeamId = teamId ?? -1;
     const name = nameInput.value.trim() || 'Player';
@@ -1258,19 +1261,22 @@
   function drawSnake(snake,cx,cy) {
     const rawSegs=snake.segments; if(rawSegs.length<2) return;
 
-    // --- Interpolation: lerp between prevSnakes and current snakes ---
-    const prev = prevSnakes.find(s => s.id === snake.id);
+    // --- Continuous smoothing: always lerping toward latest target ---
+    // This is timing-independent, so network jitter never causes stuttering
+    let disp = displaySegs.get(snake.id);
+    if (!disp || disp.length !== rawSegs.length) {
+      // Initialize or resize — snap to current positions
+      disp = rawSegs.map(s => ({ x: s.x, y: s.y }));
+      displaySegs.set(snake.id, disp);
+    }
+    // Smoothing: 0.25 per frame ≈ 95% catch-up in 10 frames (~170ms)
+    // Enough to be smooth but responsive to direction changes
+    const smooth = gameMode === 'multiplayer' ? 0.25 : 1.0;
     const segs = [];
     for (let i = 0; i < rawSegs.length; i++) {
-      if (prev && prev.segments[i]) {
-        const ps = prev.segments[i], cs = rawSegs[i];
-        segs.push({
-          x: ps.x + (cs.x - ps.x) * Math.min(interpT, 1),
-          y: ps.y + (cs.y - ps.y) * Math.min(interpT, 1)
-        });
-      } else {
-        segs.push({ x: rawSegs[i].x, y: rawSegs[i].y });
-      }
+      disp[i].x += (rawSegs[i].x - disp[i].x) * smooth;
+      disp[i].y += (rawSegs[i].y - disp[i].y) * smooth;
+      segs.push(disp[i]);
     }
 
     const headColor=getSegColor(snake,0);
