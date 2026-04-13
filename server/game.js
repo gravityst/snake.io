@@ -118,7 +118,7 @@ class Room {
     const a = Math.random() * Math.PI * 2;
     return { x: Math.cos(a)*r, y: Math.sin(a)*r };
   }
-  _thickness(s) { return 1 + 0.6 * Math.log10(1 + s.score / 50); }
+  _thickness(s) { return 1 + Math.sqrt(s.score) / 45; }
   _buildFoodGrid() {
     this.foodGrid = new Map();
     for (let i = 0; i < this.food.length; i++) {
@@ -434,7 +434,7 @@ class Room {
       const dist=Math.sqrt(dx*dx+dy*dy),t=SEGMENT_SPACING/dist;
       snake.segments.splice(1,0,{x:snake.segments[1].x+dx*t,y:snake.segments[1].y+dy*t});
     }
-    const tl=INITIAL_LENGTH+Math.floor(8*Math.log(1+snake.score/10));
+    const tl=INITIAL_LENGTH+Math.floor(1.2*Math.sqrt(snake.score));
     while(snake.segments.length>tl)snake.segments.pop();
     if(snake.boosting&&snake.score>0){
       snake.boostAccum+=BOOST_SHRINK_RATE*dt;

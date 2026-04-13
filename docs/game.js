@@ -498,7 +498,7 @@
   function hexFull(c) { if (c.length===4) return '#'+c[1]+c[1]+c[2]+c[2]+c[3]+c[3]; return c; }
   function getSegColor(snake, i) { const skin = SKINS[snake.skin]||SKINS[0]; return skin.colors[i%skin.colors.length]; }
   // Logarithmic — never caps, but slows down. 0→1.0, 100→1.48, 500→1.85, 2000→2.20, 10000→2.60
-  function getThickness(snake) { return 1 + 0.6 * Math.log10(1 + snake.score / 50); }
+  function getThickness(snake) { return 1 + Math.sqrt(snake.score) / 45; }
 
   // --- Game state ---
   let snakes = [], food = [], megaOrbs = [], particles = [];
