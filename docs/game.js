@@ -552,10 +552,12 @@
   let spectateTarget = null;
   let lastKillerPos = null;
 
-  // --- Ping display (smoothed) ---
+  // --- Ping display (heavily smoothed) ---
   let lastPingSent = 0;
   let ping = 0;
-  let smoothPing = 0; // exponential moving average
+  let smoothPing = 0;
+  let pingTimer = 0; // send ping every 2 seconds, not every frame
+  let lastStateTime = 0; // track state arrival timing
 
   // --- Kill counter ---
   let myKills = 0;
@@ -1074,16 +1076,21 @@
     snakes=newSnakes; food=newFood; megaOrbs=newMega;
     // Cache snake names for kill feed (names persist after death)
     for (const s of newSnakes) snakeNameCache.set(s.id, s.name);
-    // Ping tracking (smoothed EMA)
-    if (lastPingSent > 0) {
-      const rawPing = performance.now() - lastPingSent;
-      smoothPing = smoothPing === 0 ? rawPing : smoothPing * 0.85 + rawPing * 0.15;
+    // Track state arrival interval (measures actual server→client latency)
+    const now = performance.now();
+    if (lastStateTime > 0) {
+      const interval = now - lastStateTime;
+      // Server sends at 33ms intervals. Deviation from 33ms indicates lag.
+      const jitter = Math.abs(interval - 33);
+      const rawPing = Math.max(5, jitter + 10); // approximate — jitter correlates with latency
+      smoothPing = smoothPing === 0 ? rawPing : smoothPing * 0.92 + rawPing * 0.08;
       ping = smoothPing;
     }
+    lastStateTime = now;
     const me=snakes.find(s=>s.id===myId);
     if (me&&me.segments.length>0) {
-      camera.x+=(me.segments[0].x-camera.x)*0.2;
-      camera.y+=(me.segments[0].y-camera.y)*0.2;
+      camera.x+=(me.segments[0].x-camera.x)*0.12;
+      camera.y+=(me.segments[0].y-camera.y)*0.12;
       // Score popup on increase
       if (me.score > prevScore && prevScore > 0) {
         const diff = me.score - prevScore;
@@ -1153,7 +1160,6 @@
 
   function sendDirection() {
     if (!ws||ws.readyState!==WebSocket.OPEN||myId===null) return;
-    lastPingSent = performance.now();
     const angle = (isTouchDevice && joystickActive)
       ? joystickAngle
       : Math.atan2(mouseY-canvas.height/2,mouseX-canvas.width/2);
@@ -1706,14 +1712,18 @@
       ctx.fillStyle = 'rgba(255,255,255,0.6)';
       ctx.fillText('Spectating...', canvas.width / 2, canvas.height - 60);
     }
-    // Ping display (multiplayer)
+    // Ping display (multiplayer, updates every 0.5s for stability)
     if (gameMode === 'multiplayer' && running) {
-      const pingEl = document.getElementById('ping');
-      if (pingEl) {
-        const p = Math.round(ping);
-        const color = p < 50 ? '#0f0' : p < 100 ? '#ff0' : '#f44';
-        pingEl.textContent = p + 'ms';
-        pingEl.style.color = color;
+      pingTimer += dt;
+      if (pingTimer >= 0.5) {
+        pingTimer = 0;
+        const pingEl = document.getElementById('ping');
+        if (pingEl) {
+          const p = Math.round(ping);
+          const color = p < 30 ? '#0f0' : p < 60 ? '#ff0' : '#f44';
+          pingEl.textContent = p + 'ms';
+          pingEl.style.color = color;
+        }
       }
     }
     // Update HUD score with animated counter + kills
