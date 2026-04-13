@@ -45,7 +45,7 @@
   const HEAD_RADIUS = 14;
   const BASE_ZOOM = 0.72;
   // Multiplayer server URL (Render.com handles WebSocket + API only)
-  const SERVER_URL = 'https://snake-io-fzk5.onrender.com';
+  const SERVER_URL = 'https://snake-io.cawald1.workers.dev';
   const COLORS = ['#0ff', '#f0f', '#0f0', '#ff0', '#f80', '#08f', '#f44', '#8f0'];
 
   // --- Skins ---
