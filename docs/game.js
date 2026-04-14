@@ -1124,8 +1124,8 @@
     lastStateTime = now;
     const me=snakes.find(s=>s.id===myId);
     if (me&&me.segments.length>0) {
-      camera.x+=(me.segments[0].x-camera.x)*0.12;
-      camera.y+=(me.segments[0].y-camera.y)*0.12;
+      camera.x+=(me.segments[0].x-camera.x)*0.25;
+      camera.y+=(me.segments[0].y-camera.y)*0.25;
       // Score popup on increase
       if (me.score > prevScore && prevScore > 0) {
         const diff = me.score - prevScore;
@@ -1301,7 +1301,10 @@
     }
     // Smoothing: 0.25 per frame ≈ 95% catch-up in 10 frames (~170ms)
     // Enough to be smooth but responsive to direction changes
-    const smooth = gameMode === 'multiplayer' ? 0.25 : 1.0;
+    // Own snake: high smoothing (0.55) for responsiveness to your input
+    // Other snakes: low smoothing (0.3) to hide network jitter
+    const isMe = snake.id === myId;
+    const smooth = gameMode === 'local' ? 1.0 : (isMe ? 0.55 : 0.3);
     const segs = [];
     for (let i = 0; i < rawSegs.length; i++) {
       disp[i].x += (rawSegs[i].x - disp[i].x) * smooth;
