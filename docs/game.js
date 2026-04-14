@@ -44,10 +44,13 @@
   const DOT_RADIUS = 9;
   const HEAD_RADIUS = 14;
   const BASE_ZOOM = 0.72;
-  // Multiplayer server URL (Render.com handles WebSocket + API only)
+  // Multiplayer server URL
   const DEFAULT_SERVER_URL = 'https://snake-io-fzk5.onrender.com';
-  // Allow users to host their own server (Cloudflare Tunnel, etc)
-  let SERVER_URL = localStorage.getItem('customServerUrl') || DEFAULT_SERVER_URL;
+  // Custom server (Cloudflare Tunnel, localtunnel, self-hosted, etc)
+  // Stored in localStorage; auto-used when online, falls back to default.
+  let CUSTOM_SERVER_URL = localStorage.getItem('customServerUrl') || '';
+  let SERVER_URL = DEFAULT_SERVER_URL; // active server — updated by auto-detect
+  let usingCustom = false;
   const COLORS = ['#0ff', '#f0f', '#0f0', '#ff0', '#f80', '#08f', '#f44', '#8f0'];
 
   // --- Skins ---
@@ -872,15 +875,19 @@
       const url = customInput.value.trim().replace(/\/+$/, '');
       if (url) {
         localStorage.setItem('customServerUrl', url);
-        SERVER_URL = url;
-        alert('Custom server set:\n' + url + '\n\nReconnect or refresh to use it.');
+        CUSTOM_SERVER_URL = url;
+        usingCustom = false; // force re-detect
+        showToast('Saved — checking server...', '#0ff');
+        pollServerStatus(); // immediate check; auto-switches if online
       }
     });
     document.getElementById('customServerClear').addEventListener('click', () => {
       localStorage.removeItem('customServerUrl');
       customInput.value = '';
-      SERVER_URL = DEFAULT_SERVER_URL;
-      alert('Using default server:\n' + DEFAULT_SERVER_URL + '\n\nReconnect or refresh.');
+      CUSTOM_SERVER_URL = '';
+      usingCustom = false;
+      showToast('Custom server removed — using default', '#f80');
+      pollServerStatus();
     });
   }
 
@@ -963,33 +970,105 @@
   }
 
   let wakingTimeout = null;
-  function pollServerStatus() {
+  // Check if a specific URL responds. Returns rtt (ms) or null if down.
+  function checkServer(url, timeoutMs = 3000) {
+    if (!url) return Promise.resolve(null);
+    return new Promise(resolve => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => { ctrl.abort(); resolve(null); }, timeoutMs);
+      const t0 = performance.now();
+      fetch(url + '/api/rooms', { signal: ctrl.signal })
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then(() => { clearTimeout(timer); resolve(Math.round(performance.now() - t0)); })
+        .catch(() => { clearTimeout(timer); resolve(null); });
+    });
+  }
+
+  // Transient toast notification
+  function showToast(text, color = '#0ff', duration = 4000) {
+    let toast = document.getElementById('serverToast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'serverToast';
+      toast.style.cssText = 'position:fixed;top:56px;right:12px;z-index:200;padding:10px 16px;border-radius:10px;background:rgba(0,10,20,0.9);backdrop-filter:blur(8px);font-size:13px;font-weight:bold;letter-spacing:0.5px;transition:opacity 0.3s,transform 0.3s;pointer-events:none;';
+      document.body.appendChild(toast);
+    }
+    toast.style.color = color;
+    toast.style.borderLeft = '3px solid ' + color;
+    toast.textContent = text;
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateX(0)';
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateX(20px)';
+    }, duration);
+  }
+
+  async function pollServerStatus() {
     const onlineEl = document.getElementById('onlineCount');
-    // If response takes >1.5s, show "waking"
     if (wakingTimeout) clearTimeout(wakingTimeout);
     wakingTimeout = setTimeout(() => setStatus('waking', 'Server waking', '~30s'), 1500);
 
-    const t0 = performance.now();
-    fetch(SERVER_URL + '/api/rooms').then(r => r.json()).then(rooms => {
-      clearTimeout(wakingTimeout);
-      const rtt = Math.round(performance.now() - t0);
+    // Race: check custom and default in parallel
+    const [customRtt, defaultRtt] = await Promise.all([
+      checkServer(CUSTOM_SERVER_URL, 2500),
+      checkServer(DEFAULT_SERVER_URL, 4000),
+    ]);
+
+    clearTimeout(wakingTimeout);
+
+    // Prefer custom if online. If only default is online, use that. If both down, offline.
+    const customOnline = customRtt !== null;
+    const defaultOnline = defaultRtt !== null;
+    let targetUrl, rtt, label;
+
+    if (customOnline) {
+      targetUrl = CUSTOM_SERVER_URL; rtt = customRtt;
+      label = 'Custom server';
+      // Auto-switch notification when coming back online
+      if (!usingCustom) {
+        usingCustom = true;
+        if (CUSTOM_SERVER_URL) showToast('Faster server detected — connected to ' + CUSTOM_SERVER_URL.replace(/^https?:\/\//, ''), '#0f6');
+      }
+    } else if (defaultOnline) {
+      targetUrl = DEFAULT_SERVER_URL; rtt = defaultRtt;
+      label = CUSTOM_SERVER_URL ? 'Fallback server' : 'Server online';
+      if (usingCustom) {
+        usingCustom = false;
+        if (CUSTOM_SERVER_URL) showToast('Custom server offline — using fallback', '#f80');
+      }
+    } else {
+      // Both down
+      if (onlineEl) onlineEl.textContent = '-- online';
+      setStatus('offline', 'Server offline');
+      return;
+    }
+
+    // Apply the active URL. Reconnect if currently in multiplayer and URL changed.
+    const changed = SERVER_URL !== targetUrl;
+    SERVER_URL = targetUrl;
+    if (changed && running && gameMode === 'multiplayer' && currentRoomId) {
+      // Reconnect to the new server seamlessly
+      const name = nameInput.value.trim() || 'Player';
+      connect(name, currentRoomId, selectedTeamId >= 0 ? selectedTeamId : undefined);
+    }
+
+    // Fetch rooms for online count from the active server
+    try {
+      const r = await fetch(SERVER_URL + '/api/rooms');
+      const rooms = await r.json();
       let total = 0;
       for (const room of rooms) total += room.players || 0;
       if (onlineEl) onlineEl.textContent = total + ' online';
-      // High ping warning
-      if (rtt > 150) setStatus('laggy', 'High latency', rtt + 'ms');
-      else setStatus('online', 'Server online', rtt + 'ms');
-      // HUD ping matches status badge exactly — no separate smoothing
-      ping = rtt;
-      smoothPing = rtt;
-    }).catch(() => {
-      clearTimeout(wakingTimeout);
-      if (onlineEl) onlineEl.textContent = '-- online';
-      setStatus('offline', 'Server offline');
-    });
+    } catch (e) {}
+
+    if (rtt > 150) setStatus('laggy', label, rtt + 'ms');
+    else setStatus('online', label, rtt + 'ms');
+    ping = rtt; smoothPing = rtt;
   }
   pollServerStatus();
-  setInterval(pollServerStatus, 3000); // 3s during gameplay for up-to-date ping
+  setInterval(pollServerStatus, 5000);
 
   // =====================================================
   // WebSocket (multiplayer mode only)
