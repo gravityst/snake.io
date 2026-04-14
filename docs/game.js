@@ -928,6 +928,7 @@
     checking: '<path d="M 8 1.5 A 6.5 6.5 0 0 1 14.5 8" />',
     online: '<circle cx="8" cy="8" r="3.5" fill="currentColor"/><circle cx="8" cy="8" r="6.5" opacity="0.35"/>',
     waking: '<path d="M8 3v4l2.5 2.5M8 1.5a6.5 6.5 0 1 0 6.5 6.5" />',
+    laggy: '<path d="M2 10l3-3 3 3 3-3 3 3M2 6l3-3 3 3 3-3 3 3"/>',
     offline: '<circle cx="8" cy="8" r="6.5"/><path d="M4 4l8 8M12 4l-8 8" />',
   };
 
@@ -953,7 +954,9 @@
       let total = 0;
       for (const room of rooms) total += room.players || 0;
       if (onlineEl) onlineEl.textContent = total + ' online';
-      setStatus('online', 'Server online', rtt + 'ms');
+      // High ping warning
+      if (rtt > 150) setStatus('laggy', 'High latency', rtt + 'ms');
+      else setStatus('online', 'Server online', rtt + 'ms');
       // Expose real RTT for the in-game HUD ping display
       ping = smoothPing === 0 ? rtt : smoothPing * 0.7 + rtt * 0.3;
       smoothPing = ping;
@@ -1296,10 +1299,10 @@
     }
     // Smoothing: 0.25 per frame ≈ 95% catch-up in 10 frames (~170ms)
     // Enough to be smooth but responsive to direction changes
-    // Own snake: high smoothing (0.55) for responsiveness to your input
-    // Other snakes: low smoothing (0.3) to hide network jitter
+    // Own snake: nearly instant (client prediction)
+    // Other snakes: faster catch-up (0.5) so they stay close to real-time
     const isMe = snake.id === myId;
-    const smooth = gameMode === 'local' ? 1.0 : (isMe ? 0.55 : 0.3);
+    const smooth = gameMode === 'local' ? 1.0 : (isMe ? 0.7 : 0.5);
     const segs = [];
     for (let i = 0; i < rawSegs.length; i++) {
       disp[i].x += (rawSegs[i].x - disp[i].x) * smooth;
