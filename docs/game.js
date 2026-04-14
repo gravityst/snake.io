@@ -45,7 +45,9 @@
   const HEAD_RADIUS = 14;
   const BASE_ZOOM = 0.72;
   // Multiplayer server URL (Render.com handles WebSocket + API only)
-  const SERVER_URL = 'https://snake-io-fzk5.onrender.com';
+  const DEFAULT_SERVER_URL = 'https://snake-io-fzk5.onrender.com';
+  // Allow users to host their own server (Cloudflare Tunnel, etc)
+  let SERVER_URL = localStorage.getItem('customServerUrl') || DEFAULT_SERVER_URL;
   const COLORS = ['#0ff', '#f0f', '#0f0', '#ff0', '#f80', '#08f', '#f44', '#8f0'];
 
   // --- Skins ---
@@ -861,6 +863,26 @@
       else if (key === 'showShake') showShake = isOn;
     });
   });
+
+  // Custom server URL
+  const customInput = document.getElementById('customServerInput');
+  if (customInput) {
+    customInput.value = localStorage.getItem('customServerUrl') || '';
+    document.getElementById('customServerSave').addEventListener('click', () => {
+      const url = customInput.value.trim().replace(/\/+$/, '');
+      if (url) {
+        localStorage.setItem('customServerUrl', url);
+        SERVER_URL = url;
+        alert('Custom server set:\n' + url + '\n\nReconnect or refresh to use it.');
+      }
+    });
+    document.getElementById('customServerClear').addEventListener('click', () => {
+      localStorage.removeItem('customServerUrl');
+      customInput.value = '';
+      SERVER_URL = DEFAULT_SERVER_URL;
+      alert('Using default server:\n' + DEFAULT_SERVER_URL + '\n\nReconnect or refresh.');
+    });
+  }
 
   // --- Emote wheel ---
   const chatWheel = document.getElementById('chatWheel');

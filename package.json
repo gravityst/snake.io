@@ -4,7 +4,8 @@
   "description": "Multiplayer snake.io game with WebSocket networking",
   "main": "server/index.js",
   "scripts": {
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "host": "node server/index.js & cloudflared tunnel --url http://localhost:3000"
   },
   "dependencies": {
     "express": "^4.21.0",
