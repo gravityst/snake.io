@@ -957,9 +957,9 @@
       // High ping warning
       if (rtt > 150) setStatus('laggy', 'High latency', rtt + 'ms');
       else setStatus('online', 'Server online', rtt + 'ms');
-      // Expose real RTT for the in-game HUD ping display
-      ping = smoothPing === 0 ? rtt : smoothPing * 0.7 + rtt * 0.3;
-      smoothPing = ping;
+      // HUD ping matches status badge exactly — no separate smoothing
+      ping = rtt;
+      smoothPing = rtt;
     }).catch(() => {
       clearTimeout(wakingTimeout);
       if (onlineEl) onlineEl.textContent = '-- online';
@@ -967,7 +967,7 @@
     });
   }
   pollServerStatus();
-  setInterval(pollServerStatus, 8000);
+  setInterval(pollServerStatus, 3000); // 3s during gameplay for up-to-date ping
 
   // =====================================================
   // WebSocket (multiplayer mode only)
