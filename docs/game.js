@@ -1299,10 +1299,10 @@
     }
     // Smoothing: 0.25 per frame ≈ 95% catch-up in 10 frames (~170ms)
     // Enough to be smooth but responsive to direction changes
-    // Own snake: nearly instant (client prediction)
-    // Other snakes: faster catch-up (0.5) so they stay close to real-time
+    // Own snake: instant (client prediction handles it)
+    // Other snakes: fast snap (0.85) — just enough to hide discrete packet jumps
     const isMe = snake.id === myId;
-    const smooth = gameMode === 'local' ? 1.0 : (isMe ? 0.7 : 0.5);
+    const smooth = gameMode === 'local' ? 1.0 : (isMe ? 1.0 : 0.85);
     const segs = [];
     for (let i = 0; i < rawSegs.length; i++) {
       disp[i].x += (rawSegs[i].x - disp[i].x) * smooth;
@@ -1590,7 +1590,7 @@
     lastFrame = now; animTime += dt;
 
     // Advance interpolation factor toward 1
-    interpT += dt / 0.05; // server broadcasts at 20Hz (50ms)
+    interpT += dt / 0.033; // server broadcasts at 30Hz (33ms)
 
     // Update screen flash
     if (screenFlash) {
@@ -1697,8 +1697,16 @@
             predict.x = head.x; predict.y = head.y; predict.angle = mePred.angle || 0; predict.valid = true;
           }
           // Error-correct toward server authoritative position
-          predict.x += (head.x - predict.x) * 0.15;
-          predict.y += (head.y - predict.y) * 0.15;
+          // Only large errors (>100px) snap toward server — small errors kept local
+          const errDx = head.x - predict.x, errDy = head.y - predict.y;
+          const errDist = Math.sqrt(errDx*errDx + errDy*errDy);
+          if (errDist > 100) {
+            predict.x += errDx * 0.3;
+            predict.y += errDy * 0.3;
+          } else {
+            predict.x += errDx * 0.05;
+            predict.y += errDy * 0.05;
+          }
           // Predict: advance in player's current input direction at SNAKE_SPEED
           const targetAngle = Math.atan2(mouseY - canvas.height/2, mouseX - canvas.width/2);
           let ad = targetAngle - predict.angle;

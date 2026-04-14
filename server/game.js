@@ -5,8 +5,8 @@ const WebSocket = require('ws');
 // =====================================================
 
 const MAP_SIZE = 14000;
-const FOOD_COUNT = 600;
-const MAX_FOOD = 900;
+const FOOD_COUNT = 800;
+const MAX_FOOD = 1200;
 const SNAKE_SPEED = 280;
 const BOOST_SPEED = 500;
 const SEGMENT_SPACING = 24;
@@ -14,11 +14,11 @@ const DOT_RADIUS = 9;
 const INITIAL_LENGTH = 10;
 const HEAD_RADIUS = 14;
 const BOOST_SHRINK_RATE = 2.5;
-const MAX_BOTS = 10;
-const MEGA_ORB_COUNT = 8;
+const MAX_BOTS = 12;
+const MEGA_ORB_COUNT = 10;
 const TICK_RATE = 30;
 const TICK_MS = 1000 / TICK_RATE;
-const BROADCAST_RATE = 20;
+const BROADCAST_RATE = 30;
 const BROADCAST_MS = 1000 / BROADCAST_RATE;
 const MAX_ADVANCED_BOTS = 2;
 const MAX_PLAYERS_PER_ROOM = 30;
