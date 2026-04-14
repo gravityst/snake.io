@@ -506,6 +506,8 @@
   let interpT = 1; // interpolation factor 0→1 between state updates
   // Continuously-smoothed display positions (per-snake, per-segment)
   const displaySegs = new Map(); // snakeId → array of {x, y}
+  // Client-side prediction state (player's own snake)
+  const predict = { x: 0, y: 0, angle: 0, valid: false };
   let prevFood = []; // previous food array for spawn detection
   let screenFlash = null; // {color, alpha, timer} for mega orb eat flash
   let myId = null, ws = null, localGame = null;
@@ -820,6 +822,7 @@
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
     ping = 0; smoothPing = 0; lastPingSent = 0; lastStateTime = 0;
     displaySegs.clear();
+    predict.valid = false;
     currentRoomId = roomId;
     selectedTeamId = teamId ?? -1;
     const name = nameInput.value.trim() || 'Player';
@@ -951,6 +954,9 @@
       for (const room of rooms) total += room.players || 0;
       if (onlineEl) onlineEl.textContent = total + ' online';
       setStatus('online', 'Server online', rtt + 'ms');
+      // Expose real RTT for the in-game HUD ping display
+      ping = smoothPing === 0 ? rtt : smoothPing * 0.7 + rtt * 0.3;
+      smoothPing = ping;
     }).catch(() => {
       clearTimeout(wakingTimeout);
       if (onlineEl) onlineEl.textContent = '-- online';
@@ -1109,19 +1115,8 @@
     snakes=newSnakes; food=newFood; megaOrbs=newMega;
     // Cache snake names for kill feed (names persist after death)
     for (const s of newSnakes) snakeNameCache.set(s.id, s.name);
-    // Track state arrival interval
-    const now = performance.now();
-    if (lastStateTime > 0) {
-      const interval = now - lastStateTime;
-      // Ignore absurd intervals (connection switch, tab unfocus, etc)
-      if (interval < 500) {
-        const jitter = Math.abs(interval - 50); // server broadcasts at 20Hz
-        const rawPing = Math.max(5, Math.min(jitter + 10, 200));
-        smoothPing = (smoothPing < 5 || smoothPing > 1000) ? rawPing : smoothPing * 0.9 + rawPing * 0.1;
-        ping = smoothPing;
-      }
-    }
-    lastStateTime = now;
+    // Ping is tracked separately from the server status HTTP poll (see serverPingRtt)
+    lastStateTime = performance.now();
     const me=snakes.find(s=>s.id===myId);
     if (me&&me.segments.length>0) {
       camera.x+=(me.segments[0].x-camera.x)*0.25;
@@ -1690,6 +1685,30 @@
       } else if (gameMode==='multiplayer') {
         sendTimer += gameDt;
         if (sendTimer >= 0.033) { sendDirection(); sendTimer = 0; } // 30Hz input
+        // Client-side prediction: move the player's head locally each frame
+        // This eliminates input-to-visual lag for your own snake
+        const mePred = snakes.find(s => s.id === myId);
+        if (mePred && mePred.segments.length > 0) {
+          const head = mePred.segments[0];
+          if (!predict.valid) {
+            predict.x = head.x; predict.y = head.y; predict.angle = mePred.angle || 0; predict.valid = true;
+          }
+          // Error-correct toward server authoritative position
+          predict.x += (head.x - predict.x) * 0.15;
+          predict.y += (head.y - predict.y) * 0.15;
+          // Predict: advance in player's current input direction at SNAKE_SPEED
+          const targetAngle = Math.atan2(mouseY - canvas.height/2, mouseX - canvas.width/2);
+          let ad = targetAngle - predict.angle;
+          while (ad > Math.PI) ad -= Math.PI*2; while (ad < -Math.PI) ad += Math.PI*2;
+          const turnRate = 9; // match server turn rate
+          if (Math.abs(ad) < turnRate * gameDt) predict.angle = targetAngle;
+          else predict.angle += Math.sign(ad) * turnRate * gameDt;
+          const speed = boosting ? 500 : 280;
+          predict.x += Math.cos(predict.angle) * speed * gameDt;
+          predict.y += Math.sin(predict.angle) * speed * gameDt;
+          // Apply predicted head position to the live snake
+          head.x = predict.x; head.y = predict.y;
+        }
       }
     }
 
