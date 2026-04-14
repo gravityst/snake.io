@@ -5,10 +5,15 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "host": "node server/index.js & cloudflared tunnel --url http://localhost:3000"
+    "tunnel": "lt --port 3000 --subdomain snakeio-${SUBDOMAIN:-host}",
+    "host": "concurrently \"npm start\" \"npm run tunnel\""
   },
   "dependencies": {
     "express": "^4.21.0",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1",
+    "localtunnel": "^2.0.2"
   }
 }

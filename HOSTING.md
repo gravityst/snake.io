@@ -1,44 +1,26 @@
-# Host your own server (Cloudflare Tunnel)
+# Host your own server with a PERMANENT URL
 
-Free, no credit card required. Works from any computer — even school Chromebooks (if you can install things).
+Free, no account, no credit card, permanent URL you can save.
 
 ## Why host locally?
 
-- **Your ping**: 0-5ms (server is literally your computer)
-- **Friends' ping**: depends on distance to your location
+- **Your ping**: 0-5ms (server is your computer)
+- **Friends' ping**: based on distance to you
 - **Cost**: $0
-- **Caveat**: only works when your computer is on
+- **Permanent URL** — save it once, never change it again
 
 ## One-time setup (5 minutes)
 
 ### 1. Install Node.js
 
-Download and install: https://nodejs.org/en/download (pick the LTS version)
+Download and install: https://nodejs.org/en/download (pick LTS)
 
-Verify in a terminal:
+Verify:
 ```bash
 node --version
 ```
 
-### 2. Install cloudflared
-
-**Mac (Homebrew)**:
-```bash
-brew install cloudflared
-```
-
-**Windows**:
-Download `cloudflared-windows-amd64.exe` from https://github.com/cloudflare/cloudflared/releases/latest
-Rename it to `cloudflared.exe` and put it somewhere in your PATH (or just run it from the folder).
-
-**Linux**:
-```bash
-wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-chmod +x cloudflared-linux-amd64
-sudo mv cloudflared-linux-amd64 /usr/local/bin/cloudflared
-```
-
-### 3. Clone the game
+### 2. Clone the game
 
 ```bash
 git clone https://github.com/gravityst/snake.io.git
@@ -46,70 +28,102 @@ cd snake.io
 npm install
 ```
 
-## Running the server (every time you want to host)
+That's it. `npm install` also installs `localtunnel` which creates the public URL.
 
-Open two terminal windows in the `snake.io` folder:
+## Pick your permanent subdomain
 
-**Terminal 1 — start the game server:**
+Pick a name (letters and numbers only, no spaces). Your URL will be:
+
+```
+https://snakeio-<yourname>.loca.lt
+```
+
+Example: if you pick `curtis`, your URL is `https://snakeio-curtis.loca.lt`
+
+**Save this URL somewhere** — you'll use it forever.
+
+## Run the server (every time you want to play)
+
 ```bash
-npm start
-```
-You'll see: `Snake.io server running on port 3000`
-
-**Terminal 2 — start the public tunnel:**
-```bash
-cloudflared tunnel --url http://localhost:3000
+SUBDOMAIN=curtis npm run host
 ```
 
-After ~5 seconds, cloudflared prints a URL like:
+Replace `curtis` with whatever subdomain you chose.
+
+You'll see two outputs:
 ```
-https://random-words-xyz-123.trycloudflare.com
+Snake.io server running on port 3000
+your url is: https://snakeio-curtis.loca.lt
 ```
 
-**Copy that URL.**
+**First-time URL visit**: Localtunnel shows a "tunnel password" screen the first time you or a friend visits the URL. Click "Click to Continue". Just a one-time anti-abuse check.
 
-## Connect to your own server
+## Connect to your server
 
 1. Open https://gravityst.github.io/snake.io/
 2. Start a game (any mode)
-3. Click the gear icon (bottom-left in-game)
-4. Paste your tunnel URL in "Custom Server" field
+3. Click the gear icon ⚙️ (top-left in-game)
+4. Paste your URL in "Custom Server": `https://snakeio-curtis.loca.lt`
 5. Click **Save**
-6. Go back to menu → click MULTIPLAYER → you're now on your own server
+6. Back to menu → MULTIPLAYER → you're on your own server
+
+Once saved, it's stored in your browser. You don't need to re-enter it — just click MULTIPLAYER and it'll connect to your server.
 
 ## Share with friends
 
-Send them the tunnel URL. They do the same:
-1. Open the game URL
-2. Settings → paste your tunnel URL → Save
-3. They connect to your server
+Send them your URL. They:
+1. Open https://gravityst.github.io/snake.io/
+2. Settings → paste your URL → Save
+3. Click through the one-time localtunnel password page
+4. Play on your server
 
-Everyone on your server has ping based on distance to YOU, not Oregon.
+## Windows?
+
+Same commands, but set the env var differently:
+
+**CMD**:
+```cmd
+set SUBDOMAIN=curtis && npm run host
+```
+
+**PowerShell**:
+```powershell
+$env:SUBDOMAIN="curtis"; npm run host
+```
 
 ## When you're done
 
-Press `Ctrl+C` in both terminals to stop. The tunnel URL becomes invalid — you'll get a new one next time.
-
-## Tips
-
-- **School networks may block cloudflared** — test at home first
-- **Firewall prompts**: allow Node.js when asked
-- **The tunnel URL changes every time you restart cloudflared** — this is normal for the free tier
-- **To get a permanent URL**: requires a Cloudflare account with a domain (still free, but more setup)
+Press `Ctrl+C` to stop. Next time you want to play, run the same command — URL stays the same.
 
 ## Troubleshooting
 
-**"cloudflared: command not found"**  
-It's not in your PATH. Either add it, or run it from the folder where you downloaded it.
-
-**"Error: listen EADDRINUSE :::3000"**  
-Something else is using port 3000. Kill the old server first:
+**"Port 3000 in use"**  
+Something else is using it. Kill it:
 ```bash
-lsof -i :3000  # shows what's using it
+lsof -i :3000  # mac/linux
+netstat -ano | findstr 3000  # windows
 ```
 
-**"Can't connect from the client"**  
-Make sure the URL in settings starts with `https://` and has no trailing slash.
+**"Subdomain taken"**  
+Pick a more unique subdomain. Try `snakeio-yourname-123`.
 
-**Friends can connect but you can't**  
-Your own computer might be trying to connect through the public URL and getting blocked. Try in an incognito window.
+**Friends can't connect**  
+They need to click through the localtunnel "password" page once (says "Tunnel Password" — just click continue).
+
+**School blocks it**  
+Some school networks block these tunnels. Try at home first. If school blocks, you'd need a different approach (Fly.io with a card, paid Render, etc).
+
+**URL stops working mid-game**  
+Localtunnel's free tier sometimes drops. Just rerun `SUBDOMAIN=... npm run host` — same URL still works.
+
+## Advanced: Cloudflare Tunnel (if you want to avoid the one-time password page)
+
+If you own a domain, you can set up a Cloudflare Named Tunnel with zero password prompts:
+1. Add your domain to Cloudflare (free)
+2. Install `cloudflared`
+3. `cloudflared tunnel login`
+4. `cloudflared tunnel create snakeio`
+5. Route a subdomain to it
+6. `cloudflared tunnel run snakeio`
+
+This is only worth it if you're hosting a lot. Otherwise, localtunnel is simpler.
