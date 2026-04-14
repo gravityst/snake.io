@@ -410,6 +410,30 @@
     }
     .emote-btn:hover { transform: scale(1.15); border-color: #0ff; }
 
+    /* Server status badge */
+    #serverStatus {
+      position: fixed; top: 12px; right: 12px; z-index: 150;
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 14px; border-radius: 20px;
+      background: rgba(0, 10, 20, 0.7); border: 1px solid rgba(255,255,255,0.08);
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      color: rgba(255,255,255,0.75); font-size: 12px; letter-spacing: 1px;
+      pointer-events: none; transition: border-color 0.3s, background 0.3s;
+    }
+    #serverStatus svg { width: 16px; height: 16px; }
+    #serverStatus .status-text { text-transform: uppercase; font-weight: bold; }
+    /* status variants */
+    #serverStatus.status-checking { border-color: rgba(255,204,0,0.35); }
+    #serverStatus.status-checking svg { color: #fc0; animation: spin 1s linear infinite; }
+    #serverStatus.status-online { border-color: rgba(0,255,100,0.35); }
+    #serverStatus.status-online svg { color: #0f6; }
+    #serverStatus.status-waking { border-color: rgba(255,136,0,0.35); }
+    #serverStatus.status-waking svg { color: #f80; animation: pulse 1.2s ease-in-out infinite; }
+    #serverStatus.status-offline { border-color: rgba(255,68,68,0.35); }
+    #serverStatus.status-offline svg { color: #f44; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
     /* Copy code button */
     .copy-code-btn {
       padding: 4px 10px; font-size: 11px; font-weight: bold;
@@ -435,6 +459,16 @@
 
   <!-- Animated background canvas for menu -->
   <canvas id="menuBg" style="position:fixed;top:0;left:0;z-index:99;pointer-events:none;"></canvas>
+
+  <!-- Server status indicator -->
+  <div id="serverStatus" class="status-checking">
+    <svg id="statusIcon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <!-- Default: spinning arc (checking) -->
+      <path d="M 8 1.5 A 6.5 6.5 0 0 1 14.5 8" />
+    </svg>
+    <span class="status-text" id="statusText">Checking</span>
+    <span id="statusPing" style="opacity:0.6;font-size:11px;"></span>
+  </div>
 
   <div id="startScreen">
     <h1>SNAKE.IO</h1>
@@ -550,7 +584,7 @@
     <div style="position:absolute;bottom:60px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,0.4);font-size:12px;">Press Tab or click outside to close</div>
   </div>
 
-  <script src="local-game.js?v=14"></script>
-  <script src="game.js?v=14"></script>
+  <script src="local-game.js?v=15"></script>
+  <script src="game.js?v=15"></script>
 </body>
 </html>

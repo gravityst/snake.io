@@ -915,20 +915,50 @@
     }
   }
 
-  // --- Online count polling for start screen ---
-  function pollOnlineCount() {
-    const el = document.getElementById('onlineCount');
-    if (!el) return;
+  // --- Server status indicator + online count ---
+  const statusEl = document.getElementById('serverStatus');
+  const statusIcon = document.getElementById('statusIcon');
+  const statusText = document.getElementById('statusText');
+  const statusPing = document.getElementById('statusPing');
+
+  const ICONS = {
+    checking: '<path d="M 8 1.5 A 6.5 6.5 0 0 1 14.5 8" />',
+    online: '<circle cx="8" cy="8" r="3.5" fill="currentColor"/><circle cx="8" cy="8" r="6.5" opacity="0.35"/>',
+    waking: '<path d="M8 3v4l2.5 2.5M8 1.5a6.5 6.5 0 1 0 6.5 6.5" />',
+    offline: '<circle cx="8" cy="8" r="6.5"/><path d="M4 4l8 8M12 4l-8 8" />',
+  };
+
+  function setStatus(state, text, extra) {
+    if (!statusEl) return;
+    statusEl.className = 'status-' + state;
+    statusIcon.innerHTML = ICONS[state];
+    statusText.textContent = text;
+    statusPing.textContent = extra || '';
+  }
+
+  let wakingTimeout = null;
+  function pollServerStatus() {
+    const onlineEl = document.getElementById('onlineCount');
+    // If response takes >1.5s, show "waking"
+    if (wakingTimeout) clearTimeout(wakingTimeout);
+    wakingTimeout = setTimeout(() => setStatus('waking', 'Waking up', '~30s'), 1500);
+
+    const t0 = performance.now();
     fetch(SERVER_URL + '/api/rooms').then(r => r.json()).then(rooms => {
+      clearTimeout(wakingTimeout);
+      const rtt = Math.round(performance.now() - t0);
       let total = 0;
       for (const room of rooms) total += room.players || 0;
-      el.textContent = total + ' online';
-    }).catch(() => { el.textContent = '-- online'; });
+      if (onlineEl) onlineEl.textContent = total + ' online';
+      setStatus('online', 'Online', rtt + 'ms');
+    }).catch(() => {
+      clearTimeout(wakingTimeout);
+      if (onlineEl) onlineEl.textContent = '-- online';
+      setStatus('offline', 'Offline');
+    });
   }
-  pollOnlineCount();
-  setInterval(() => {
-    if (startScreen.style.display !== 'none') pollOnlineCount();
-  }, 10000);
+  pollServerStatus();
+  setInterval(pollServerStatus, 8000);
 
   // =====================================================
   // WebSocket (multiplayer mode only)
