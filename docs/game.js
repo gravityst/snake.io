@@ -941,7 +941,7 @@
     const onlineEl = document.getElementById('onlineCount');
     // If response takes >1.5s, show "waking"
     if (wakingTimeout) clearTimeout(wakingTimeout);
-    wakingTimeout = setTimeout(() => setStatus('waking', 'Waking up', '~30s'), 1500);
+    wakingTimeout = setTimeout(() => setStatus('waking', 'Server waking', '~30s'), 1500);
 
     const t0 = performance.now();
     fetch(SERVER_URL + '/api/rooms').then(r => r.json()).then(rooms => {
@@ -950,11 +950,11 @@
       let total = 0;
       for (const room of rooms) total += room.players || 0;
       if (onlineEl) onlineEl.textContent = total + ' online';
-      setStatus('online', 'Online', rtt + 'ms');
+      setStatus('online', 'Server online', rtt + 'ms');
     }).catch(() => {
       clearTimeout(wakingTimeout);
       if (onlineEl) onlineEl.textContent = '-- online';
-      setStatus('offline', 'Offline');
+      setStatus('offline', 'Server offline');
     });
   }
   pollServerStatus();
