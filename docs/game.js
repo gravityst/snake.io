@@ -1122,8 +1122,11 @@
     lastStateTime = performance.now();
     const me=snakes.find(s=>s.id===myId);
     if (me&&me.segments.length>0) {
-      camera.x+=(me.segments[0].x-camera.x)*0.25;
-      camera.y+=(me.segments[0].y-camera.y)*0.25;
+      // Fix 5: camera follows predicted head (not stale server position)
+      const camTgtX = (gameMode === 'multiplayer' && predict.valid) ? predict.x : me.segments[0].x;
+      const camTgtY = (gameMode === 'multiplayer' && predict.valid) ? predict.y : me.segments[0].y;
+      camera.x+=(camTgtX-camera.x)*0.3;
+      camera.y+=(camTgtY-camera.y)*0.3;
       // Score popup on increase
       if (me.score > prevScore && prevScore > 0) {
         const diff = me.score - prevScore;
@@ -1289,24 +1292,38 @@
   function drawSnake(snake,cx,cy) {
     const rawSegs=snake.segments; if(rawSegs.length<2) return;
 
-    // --- Continuous smoothing: always lerping toward latest target ---
-    // This is timing-independent, so network jitter never causes stuttering
+    // --- Fix 4: time-based interpolation between server snapshots ---
+    // For each segment, lerp between previous server position and current
+    // server position using interpT (0→1 over 33ms server broadcast interval)
+    const isMe = snake.id === myId;
+    const prev = prevSnakes.find(s => s.id === snake.id);
+    const t = Math.min(interpT, 1);
+    // Build interpolated target positions from prev→current server state
+    const target = [];
+    for (let i = 0; i < rawSegs.length; i++) {
+      if (prev && prev.segments[i]) {
+        target.push({
+          x: prev.segments[i].x + (rawSegs[i].x - prev.segments[i].x) * t,
+          y: prev.segments[i].y + (rawSegs[i].y - prev.segments[i].y) * t,
+        });
+      } else {
+        target.push({ x: rawSegs[i].x, y: rawSegs[i].y });
+      }
+    }
+    // Continuous display-side lerp on top, for extra smoothness and
+    // to absorb any remaining jitter between interpolation cycles.
     let disp = displaySegs.get(snake.id);
     if (!disp || disp.length !== rawSegs.length) {
-      // Initialize or resize — snap to current positions
-      disp = rawSegs.map(s => ({ x: s.x, y: s.y }));
+      disp = target.map(s => ({ x: s.x, y: s.y }));
       displaySegs.set(snake.id, disp);
     }
-    // Smoothing: 0.25 per frame ≈ 95% catch-up in 10 frames (~170ms)
-    // Enough to be smooth but responsive to direction changes
-    // Own snake: instant (client prediction handles it)
-    // Other snakes: fast snap (0.85) — just enough to hide discrete packet jumps
-    const isMe = snake.id === myId;
-    const smooth = gameMode === 'local' ? 1.0 : (isMe ? 1.0 : 0.85);
+    // Fix 3: local player body catches up FAST (0.9+) — stays near head
+    // Other snakes: 0.6 — hides jitter but keeps close to real-time
+    const smooth = gameMode === 'local' ? 1.0 : (isMe ? 0.9 : 0.6);
     const segs = [];
     for (let i = 0; i < rawSegs.length; i++) {
-      disp[i].x += (rawSegs[i].x - disp[i].x) * smooth;
-      disp[i].y += (rawSegs[i].y - disp[i].y) * smooth;
+      disp[i].x += (target[i].x - disp[i].x) * smooth;
+      disp[i].y += (target[i].y - disp[i].y) * smooth;
       segs.push(disp[i]);
     }
 
@@ -1686,32 +1703,27 @@
         }
         playerCountEl.textContent=`Players: ${localGame.snakes.filter(s=>s.alive).length}`;
       } else if (gameMode==='multiplayer') {
-        sendTimer += gameDt;
-        if (sendTimer >= 0.033) { sendDirection(); sendTimer = 0; } // 30Hz input
-        // Client-side prediction: move the player's head locally each frame
-        // This eliminates input-to-visual lag for your own snake
+        // Fix 1: send mouse direction every frame (no throttle)
+        sendDirection();
+        // Fix 2+5: Client-side prediction with aggressive error correction
         const mePred = snakes.find(s => s.id === myId);
         if (mePred && mePred.segments.length > 0) {
           const head = mePred.segments[0];
           if (!predict.valid) {
             predict.x = head.x; predict.y = head.y; predict.angle = mePred.angle || 0; predict.valid = true;
           }
-          // Error-correct toward server authoritative position
-          // Only large errors (>100px) snap toward server — small errors kept local
+          // Error-correct toward server more aggressively (0.35 base)
+          // Very large errors (>200px) snap harder to catch desync/teleport
           const errDx = head.x - predict.x, errDy = head.y - predict.y;
           const errDist = Math.sqrt(errDx*errDx + errDy*errDy);
-          if (errDist > 100) {
-            predict.x += errDx * 0.3;
-            predict.y += errDy * 0.3;
-          } else {
-            predict.x += errDx * 0.05;
-            predict.y += errDy * 0.05;
-          }
-          // Predict: advance in player's current input direction at SNAKE_SPEED
+          const errFactor = errDist > 200 ? 0.6 : 0.35;
+          predict.x += errDx * errFactor;
+          predict.y += errDy * errFactor;
+          // Predict: advance in player's current input direction
           const targetAngle = Math.atan2(mouseY - canvas.height/2, mouseX - canvas.width/2);
           let ad = targetAngle - predict.angle;
           while (ad > Math.PI) ad -= Math.PI*2; while (ad < -Math.PI) ad += Math.PI*2;
-          const turnRate = 9; // match server turn rate
+          const turnRate = 9;
           if (Math.abs(ad) < turnRate * gameDt) predict.angle = targetAngle;
           else predict.angle += Math.sign(ad) * turnRate * gameDt;
           const speed = boosting ? 500 : 280;
