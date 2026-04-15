@@ -5,8 +5,8 @@ const WebSocket = require('ws');
 // =====================================================
 
 const MAP_SIZE = 14000;
-const FOOD_COUNT = 800;
-const MAX_FOOD = 1200;
+const FOOD_COUNT = 1400;
+const MAX_FOOD = 1800;
 const SNAKE_SPEED = 280;
 const BOOST_SPEED = 500;
 const SEGMENT_SPACING = 24;
@@ -434,7 +434,7 @@ class Room {
       const dist=Math.sqrt(dx*dx+dy*dy),t=SEGMENT_SPACING/dist;
       snake.segments.splice(1,0,{x:snake.segments[1].x+dx*t,y:snake.segments[1].y+dy*t});
     }
-    const tl=INITIAL_LENGTH+Math.floor(1.2*Math.sqrt(snake.score)+snake.score/100);
+    const tl=INITIAL_LENGTH+Math.floor(2.5*Math.sqrt(snake.score)+snake.score/60);
     while(snake.segments.length>tl)snake.segments.pop();
     if(snake.boosting&&snake.score>0){
       snake.boostAccum+=BOOST_SHRINK_RATE*dt;
@@ -588,7 +588,9 @@ class Room {
       if(ws.readyState!==WebSocket.OPEN)continue;
       const mySnake=this.snakes.get(playerId);
       if(!mySnake||!mySnake.alive)continue;
-      const cx=mySnake.segments[0].x,cy=mySnake.segments[0].y,viewRange=1400;
+      const cx=mySnake.segments[0].x,cy=mySnake.segments[0].y;
+      // Larger view range (scales with zoom-out for big snakes)
+      const viewRange=1800+Math.min(Math.sqrt(mySnake.score)*8,800);
       const visSnakes=[],visFood=[],visMega=[];
       for(const [,snake] of this.snakes){
         if(!snake.alive)continue;
