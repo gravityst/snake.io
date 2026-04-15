@@ -48,7 +48,21 @@
   const DEFAULT_SERVER_URL = 'https://snake-io-fzk5.onrender.com';
   // Custom server (Cloudflare Tunnel, localtunnel, self-hosted, etc)
   // Stored in localStorage; auto-used when online, falls back to default.
+  // Can be set via URL param: ?server=snakeio-curtis or ?server=https://full.url
   let CUSTOM_SERVER_URL = localStorage.getItem('customServerUrl') || '';
+  (() => {
+    const urlParam = new URLSearchParams(location.search).get('server');
+    if (urlParam) {
+      let serverUrl = urlParam.trim();
+      // Shorthand: just the subdomain → expand to full localtunnel URL
+      if (!serverUrl.startsWith('http')) {
+        serverUrl = 'https://snakeio-' + serverUrl + '.loca.lt';
+      }
+      CUSTOM_SERVER_URL = serverUrl;
+      localStorage.setItem('customServerUrl', serverUrl);
+      console.log('[snake.io] Server set from URL param:', serverUrl);
+    }
+  })();
   let SERVER_URL = DEFAULT_SERVER_URL; // active server — updated by auto-detect
   let usingCustom = false;
   const COLORS = ['#0ff', '#f0f', '#0f0', '#ff0', '#f80', '#08f', '#f44', '#8f0'];
@@ -869,16 +883,34 @@
 
   // Custom server URL
   const customInput = document.getElementById('customServerInput');
+  const shareSection = document.getElementById('shareSection');
+  const shareLinkInput = document.getElementById('shareLinkInput');
+
+  function updateShareSection() {
+    if (!shareSection || !shareLinkInput) return;
+    if (CUSTOM_SERVER_URL) {
+      shareSection.style.display = 'block';
+      // Build shareable link. Prefer shorthand for snakeio-*.loca.lt URLs.
+      const m = CUSTOM_SERVER_URL.match(/^https?:\/\/snakeio-([a-z0-9-]+)\.loca\.lt\/?$/i);
+      const base = location.origin + location.pathname;
+      shareLinkInput.value = m ? `${base}?server=${m[1]}` : `${base}?server=${encodeURIComponent(CUSTOM_SERVER_URL)}`;
+    } else {
+      shareSection.style.display = 'none';
+    }
+  }
+
   if (customInput) {
-    customInput.value = localStorage.getItem('customServerUrl') || '';
+    customInput.value = CUSTOM_SERVER_URL;
+    updateShareSection();
     document.getElementById('customServerSave').addEventListener('click', () => {
       const url = customInput.value.trim().replace(/\/+$/, '');
       if (url) {
         localStorage.setItem('customServerUrl', url);
         CUSTOM_SERVER_URL = url;
-        usingCustom = false; // force re-detect
+        usingCustom = false;
+        updateShareSection();
         showToast('Saved — checking server...', '#0ff');
-        pollServerStatus(); // immediate check; auto-switches if online
+        pollServerStatus();
       }
     });
     document.getElementById('customServerClear').addEventListener('click', () => {
@@ -886,10 +918,55 @@
       customInput.value = '';
       CUSTOM_SERVER_URL = '';
       usingCustom = false;
+      updateShareSection();
       showToast('Custom server removed — using default', '#f80');
       pollServerStatus();
     });
   }
+
+  // Share link copy button
+  const copyShareBtn = document.getElementById('copyShareLink');
+  if (copyShareBtn) {
+    copyShareBtn.addEventListener('click', () => {
+      if (!shareLinkInput || !shareLinkInput.value) return;
+      navigator.clipboard.writeText(shareLinkInput.value).then(() => {
+        copyShareBtn.textContent = 'Copied!';
+        setTimeout(() => { copyShareBtn.textContent = 'Copy'; }, 1500);
+      });
+    });
+  }
+
+  // Host guide toggle
+  const toggleGuideBtn = document.getElementById('toggleHostGuide');
+  const hostGuide = document.getElementById('hostGuide');
+  if (toggleGuideBtn) {
+    toggleGuideBtn.addEventListener('click', () => {
+      const show = hostGuide.style.display === 'none';
+      hostGuide.style.display = show ? 'block' : 'none';
+      toggleGuideBtn.textContent = show ? 'Hide guide ↑' : 'How to host your own server →';
+    });
+  }
+
+  // Populate status badges in settings (called on each poll)
+  function updateServerBadges(defaultRtt, customRtt) {
+    const defBadge = document.getElementById('defaultStatus');
+    const cusBadge = document.getElementById('customStatus');
+    const actBadge = document.getElementById('activeServerBadge');
+    if (defBadge) {
+      if (defaultRtt !== null) { defBadge.className = 'server-badge' + (SERVER_URL === DEFAULT_SERVER_URL ? ' active' : ' inactive'); defBadge.textContent = defaultRtt + 'ms'; }
+      else { defBadge.className = 'server-badge inactive'; defBadge.textContent = 'OFFLINE'; }
+    }
+    if (cusBadge) {
+      if (!CUSTOM_SERVER_URL) { cusBadge.className = 'server-badge inactive'; cusBadge.textContent = 'NOT SET'; }
+      else if (customRtt !== null) { cusBadge.className = 'server-badge' + (SERVER_URL === CUSTOM_SERVER_URL ? ' active' : ' inactive'); cusBadge.textContent = customRtt + 'ms'; }
+      else { cusBadge.className = 'server-badge inactive'; cusBadge.textContent = 'OFFLINE'; }
+    }
+    if (actBadge) {
+      actBadge.className = 'server-badge active';
+      actBadge.textContent = usingCustom ? 'CUSTOM' : 'DEFAULT';
+    }
+  }
+  window.__updateServerBadges = updateServerBadges;
 
   // --- Emote wheel ---
   const chatWheel = document.getElementById('chatWheel');
@@ -1017,6 +1094,8 @@
     ]);
 
     clearTimeout(wakingTimeout);
+    // Update the detailed badges in the settings panel
+    if (window.__updateServerBadges) window.__updateServerBadges(defaultRtt, customRtt);
 
     // Prefer custom if online. If only default is online, use that. If both down, offline.
     const customOnline = customRtt !== null;
