@@ -77,31 +77,38 @@
     { name: 'Crimson', colors: ['#c12'] }, { name: 'Teal', colors: ['#0a8'] },
     { name: 'Amber', colors: ['#fa3'] },
     { name: 'Bumblebee', colors: ['#ff0','#222'] }, { name: 'Zebra', colors: ['#fff','#111'] },
-    { name: 'Coralreef', colors: ['#f44','#fff'] }, { name: 'Wasp', colors: ['#f80','#000'] },
+    { name: 'Coralreef', colors: ['#f44','#fff'], unlockScore: 750 }, { name: 'Wasp', colors: ['#f80','#000'] },
     { name: 'Mintchip', colors: ['#5fc','#222'] }, { name: 'Bubblegum', colors: ['#f6c','#fff'] },
     { name: 'Twilight', colors: ['#a0f','#08f'] },
     { name: 'Sunset', colors: ['#f80','#f44','#ff0'] }, { name: 'Ocean', colors: ['#0ff','#08f','#04d'] },
     { name: 'Toxic', colors: ['#0f0','#ff0','#0f0'] }, { name: 'Fire', colors: ['#f44','#f80','#ff0'] },
-    { name: 'Galaxy', colors: ['#a0f','#08f','#f0f','#0ff'] },
+    { name: 'Galaxy', colors: ['#a0f','#08f','#f0f','#0ff'], unlockScore: 1800 },
     { name: 'Candy', colors: ['#f0f','#fff','#f0f','#fff'] },
     { name: 'Ice', colors: ['#aef','#0ff','#fff'] },
-    { name: 'Lava', colors: ['#f44','#f80','#ff0','#f44'] },
+    { name: 'Lava', colors: ['#f44','#f80','#ff0','#f44'], unlockScore: 1200 },
     { name: 'Forest', colors: ['#0a4','#0f0','#4f8'] },
-    { name: 'Aurora', colors: ['#0fa','#0af','#a0f','#0fa'] },
+    { name: 'Aurora', colors: ['#0fa','#0af','#a0f','#0fa'], unlockScore: 2600 },
     { name: 'Cosmic', colors: ['#a0f','#f0f','#fff','#08f'] },
     { name: 'Peacock', colors: ['#0ff','#0a8','#08f','#a0f'] },
     { name: 'Strawberry', colors: ['#f44','#fff','#f0c'] },
     { name: 'Watermelon', colors: ['#f44','#0f0','#fff'] },
     { name: 'Matrix', colors: ['#0f0','#0a4','#0f0','#fff'] },
-    { name: 'Cyberpunk', colors: ['#f0f','#0ff','#000','#f0f','#0ff'] },
-    { name: 'Dragon', colors: ['#f44','#ff0','#0a4','#08f'] },
-    { name: 'Plasma', colors: ['#f0f','#a0f','#08f','#0ff'] },
+    { name: 'Cyberpunk', colors: ['#f0f','#0ff','#000','#f0f','#0ff'], unlockScore: 1000 },
+    { name: 'Dragon', colors: ['#f44','#ff0','#0a4','#08f'], unlockScore: 3200 },
+    { name: 'Plasma', colors: ['#f0f','#a0f','#08f','#0ff'], unlockScore: 2200 },
     { name: 'Pumpkin', colors: ['#f80','#222','#f80','#222'] },
-    { name: 'Neon Party', colors: ['#f0f','#0ff','#ff0','#0f0'] },
-    { name: 'Rainbow', colors: ['#f44','#f80','#ff0','#0f0','#08f','#a0f'] },
+    { name: 'Neon Party', colors: ['#f0f','#0ff','#ff0','#0f0'], unlockScore: 1400 },
+    { name: 'Rainbow', colors: ['#f44','#f80','#ff0','#0f0','#08f','#a0f'], unlockScore: 4000 },
     { name: 'Pastel', colors: ['#fbb','#fdb','#ffb','#bfb','#bdf','#fbf'] },
     { name: 'Spectrum', colors: ['#f00','#f80','#ff0','#0f0','#0ff','#08f','#a0f','#f0f'] },
   ];
+
+  const LOCAL_MODES = [
+    { id: 'classic', label: 'Classic Arena' },
+    { id: 'royale', label: 'Royal Gauntlet' }
+  ];
+  let selectedLocalMode = localStorage.getItem('selectedLocalMode') || 'classic';
+  let bestScore = parseInt(localStorage.getItem('snakeBestScore') || '0', 10) || 0;
 
   let selectedSkin = 0;
   let selectedAccessory = 0;
@@ -318,8 +325,10 @@
   function buildSkinGrid() {
     skinGrid.innerHTML = '';
     SKINS.forEach((skin, idx) => {
+      const unlockScore = skin.unlockScore || 0;
+      const locked = unlockScore && unlockScore > bestScore;
       const card = document.createElement('div');
-      card.className = 'skin-card' + (idx === selectedSkin ? ' selected' : '');
+      card.className = 'skin-card' + (idx === selectedSkin ? ' selected' : '') + (locked ? ' locked' : '');
       const dotsDiv = document.createElement('div');
       dotsDiv.className = 'skin-dots';
       const pc = Math.min(skin.colors.length >= 2 ? 5 : 3, 6);
@@ -333,9 +342,15 @@
         dotsDiv.appendChild(dot);
       }
       const nameDiv = document.createElement('div');
-      nameDiv.className = 'skin-name'; nameDiv.textContent = skin.name;
+      nameDiv.className = 'skin-name';
+      nameDiv.textContent = locked ? `UNLOCK @ ${unlockScore}` : skin.name;
       card.appendChild(dotsDiv); card.appendChild(nameDiv);
       card.addEventListener('click', () => {
+        if (locked) {
+          const remaining = unlockScore - bestScore;
+          window.alert(`Reach ${unlockScore}+ best score to unlock ${skin.name}. ${remaining} more points to go.`);
+          return;
+        }
         selectedSkin = idx;
         document.querySelectorAll('.skin-card').forEach(c => c.classList.remove('selected'));
         card.classList.add('selected');
@@ -519,8 +534,35 @@
   // Logarithmic — never caps, but slows down. 0→1.0, 100→1.48, 500→1.85, 2000→2.20, 10000→2.60
   function getThickness(snake) { return 1 + Math.sqrt(snake.score) / 45 + snake.score / 8000; }
 
-  // --- Game state ---
-  let snakes = [], food = [], megaOrbs = [], particles = [];
+  function updateProgressPanel() {
+    const bestEl = document.getElementById('bestScoreDisplay');
+    const nextEl = document.getElementById('nextUnlockDisplay');
+    if (bestEl) bestEl.textContent = bestScore;
+    const locked = SKINS
+      .filter(s => s.unlockScore && s.unlockScore > bestScore)
+      .sort((a, b) => a.unlockScore - b.unlockScore);
+    if (nextEl) {
+      if (locked.length > 0) {
+        nextEl.textContent = `${locked[0].name} skin @ ${locked[0].unlockScore}`;
+      } else {
+        nextEl.textContent = 'All skins unlocked';
+      }
+    }
+  }
+
+  function saveBestScore(score) {
+    if (score <= bestScore) return;
+    bestScore = score;
+    localStorage.setItem('snakeBestScore', String(bestScore));
+    updateProgressPanel();
+    buildSkinGrid();
+  }
+
+  function applyModeSelection() {
+    document.getElementById('classicModeBtn').classList.toggle('active', selectedLocalMode === 'classic');
+    document.getElementById('royaleModeBtn').classList.toggle('active', selectedLocalMode === 'royale');
+    localStorage.setItem('selectedLocalMode', selectedLocalMode);
+  }
   let prevSnakes = []; // previous frame snakes for interpolation
   let interpT = 1; // interpolation factor 0→1 between state updates
   // Continuously-smoothed display positions (per-snake, per-segment)
@@ -683,6 +725,15 @@
   // =====================================================
   // Mode selection
   // =====================================================
+  const classicModeBtn = document.getElementById('classicModeBtn');
+  const royaleModeBtn = document.getElementById('royaleModeBtn');
+  if (classicModeBtn && royaleModeBtn) {
+    classicModeBtn.addEventListener('click', () => { selectedLocalMode = 'classic'; applyModeSelection(); });
+    royaleModeBtn.addEventListener('click', () => { selectedLocalMode = 'royale'; applyModeSelection(); });
+  }
+  applyModeSelection();
+  updateProgressPanel();
+
   playAIBtn.addEventListener('click', startLocalGame);
   nameInput.addEventListener('keydown', (e) => { if (e.key==='Enter') startLocalGame(); });
   respawnBtn.addEventListener('click', () => {
@@ -745,9 +796,10 @@
     lifeStartTime = performance.now(); foodEaten = 0; peakScore = 0; emoteDisplays = [];
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
     const name = nameInput.value.trim() || 'Player';
-    localGame = new LocalGame(name, selectedSkin);
+    localGame = new LocalGame(name, selectedSkin, selectedLocalMode);
     myId = localGame.playerId;
     localGame.onPlayerDeath((score) => {
+      saveBestScore(score);
       lastScore = score;
       if (score > peakScore) peakScore = score;
       finalScoreEl.textContent = score;
@@ -1428,6 +1480,30 @@
     ctx.strokeStyle='rgba(255,60,60,0.5)'; ctx.lineWidth=4; ctx.strokeRect(sx,sy,MAP_SIZE,MAP_SIZE);
   }
 
+  function drawRoyaleRing(cx, cy) {
+    if (!localGame || localGame.mode !== 'royale') return;
+    const midX = canvas.width / 2;
+    const midY = canvas.height / 2;
+    const scaledRadius = localGame.safeRadius * zoom;
+    const pulse = 1 + Math.sin(localGame.shrinkPulse) * 0.08;
+    ctx.strokeStyle = 'rgba(255, 176, 74, 0.35)';
+    ctx.lineWidth = 5;
+    ctx.setLineDash([10, 12]);
+    ctx.lineDashOffset = -animTime * 18;
+    ctx.beginPath();
+    ctx.arc(midX, midY, scaledRadius * pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255, 176, 74, 0.08)';
+    ctx.beginPath();
+    ctx.arc(midX, midY, scaledRadius * pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = 'bold 13px "Segoe UI",sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+    ctx.textAlign = 'center';
+    ctx.fillText('SAFE ZONE', midX, midY - scaledRadius * pulse - 18);
+  }
+
   function drawFood(cx,cy) {
     const halfW=canvas.width/(2*zoom)+40,halfH=canvas.height/(2*zoom)+40;
     const midX=canvas.width/2,midY=canvas.height/2;
@@ -1937,7 +2013,7 @@
 
     ctx.save();
     ctx.translate(canvas.width/2,canvas.height/2);ctx.scale(zoom,zoom);ctx.translate(-canvas.width/2,-canvas.height/2);
-    drawStars(cx,cy); if(showGrid) drawGrid(cx,cy); drawBorder(cx,cy); drawFood(cx,cy); drawMegaOrbs(cx,cy);
+    drawStars(cx,cy); if(showGrid) drawGrid(cx,cy); drawBorder(cx,cy); drawRoyaleRing(cx,cy); drawFood(cx,cy); drawMegaOrbs(cx,cy);
     const me=snakes.find(s=>s.id===myId);
     for(const snake of snakes){if(snake.alive&&snake.id!==myId)drawSnake(snake,cx,cy);}
     if(me&&me.alive) drawSnake(me,cx,cy);

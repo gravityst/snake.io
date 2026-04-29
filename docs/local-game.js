@@ -4,7 +4,7 @@
 // ============================================================
 
 class LocalGame {
-  constructor(playerName, skinIdx) {
+  constructor(playerName, skinIdx, mode = 'classic') {
     this.MAP_SIZE = 14000;
     this.FOOD_COUNT = 1800;
     this.SNAKE_SPEED = 280;
@@ -16,6 +16,11 @@ class LocalGame {
     this.BOOST_SHRINK_RATE = 2.5;
     this.BOT_COUNT = 25;
     this.MEGA_ORB_COUNT = 12;
+    this.mode = mode;
+    this.safeRadius = this.MAP_SIZE / 2 - 250;
+    this.shrinkDelay = 10;
+    this.shrinkRate = 22;
+    this.shrinkPulse = 0;
 
     this.snakes = [];
     this.food = [];
@@ -130,6 +135,15 @@ class LocalGame {
     // Collisions
     this._checkCollisions();
 
+    // Royal Gauntlet safe zone
+    if (this.mode === 'royale') {
+      this.shrinkDelay = Math.max(0, this.shrinkDelay - dt);
+      if (this.shrinkDelay <= 0) {
+        this.safeRadius = Math.max(600, this.safeRadius - this.shrinkRate * dt);
+        this.shrinkPulse = (this.shrinkPulse + dt * 2) % (Math.PI * 2);
+      }
+    }
+
     // Respawn dead bots
     for (const s of this.snakes) { if (s.isBot && !s.alive) this._respawnBot(s); }
 
@@ -151,6 +165,10 @@ class LocalGame {
     head.y += Math.sin(snake.angle)*speed*dt;
     const h = this.MAP_SIZE/2;
     if (head.x<-h||head.x>h||head.y<-h||head.y>h) { this._kill(snake, null); return; }
+    if (this.mode === 'royale') {
+      const dist = Math.sqrt(head.x * head.x + head.y * head.y);
+      if (dist > this.safeRadius) { this._kill(snake, null); return; }
+    }
     while (snake.segments.length >= 2) {
       const dx=head.x-snake.segments[1].x, dy=head.y-snake.segments[1].y;
       if (dx*dx+dy*dy < this.SEGMENT_SPACING**2) break;
