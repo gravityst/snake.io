@@ -18,6 +18,9 @@
       display: block;
       position: fixed;
       top: 0; left: 0;
+      z-index: 45;
+      width: 100%;
+      height: 100%;
     }
 
     /* Flat outline button */
@@ -582,7 +585,7 @@
   </div>
 
   <!-- Animated background canvas for menu -->
-  <canvas id="menuBg" style="position:fixed;top:0;left:0;z-index:99;pointer-events:none;"></canvas>
+  <canvas id="menuBg" style="position:fixed;top:0;left:0;z-index:30;pointer-events:none;width:100%;height:100%;"></canvas>
 
   <!-- Server status indicator -->
   <div id="serverStatus" class="status-checking">

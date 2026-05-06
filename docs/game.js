@@ -908,6 +908,10 @@
     hud.style.display='none';
     const sp = document.getElementById('settingsPanel');
     if (sp) sp.style.display = 'none';
+    const menuBg = document.getElementById('menuBg');
+    if (menuBg) menuBg.style.display = 'none';
+    const loadingScreen = document.getElementById('loadingScreen');
+    if (loadingScreen) loadingScreen.style.display = 'none';
     closeEmoteWheel();
   }
 
