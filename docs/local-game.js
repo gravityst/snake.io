@@ -251,6 +251,21 @@ class LocalGame {
     snake.skin=Math.floor(Math.random()*43); snake.skill=this._randomSkill();
   }
 
+  // Royal Gauntlet: head back to origin if the safe zone is closing in.
+  // Margin scales with snake length so longer bots U-turn earlier.
+  _fleeShrinkZone(s) {
+    if (this.mode !== 'royale') return false;
+    const h = s.segments[0];
+    const dist = Math.sqrt(h.x * h.x + h.y * h.y);
+    const margin = 80 + s.segments.length * 1.5;
+    if (dist > this.safeRadius - margin) {
+      s.targetAngle = Math.atan2(-h.y, -h.x);
+      s.boosting = dist > this.safeRadius - margin * 0.4 && s.score > 10;
+      return true;
+    }
+    return false;
+  }
+
   // --- Bot AI ---
   _botAI(snake, dt) {
     if (snake.skill===2) this._advAI(snake,dt);
@@ -262,6 +277,7 @@ class LocalGame {
     s.botTimer-=dt; if(s.botTimer>0) return; s.botTimer=0.5+Math.random()*0.6;
     const h=s.segments[0], wall=this.MAP_SIZE/2-250;
     if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=false;return;}
+    if(this._fleeShrinkZone(s)) return;
     // Basic threat avoidance — don't blindly crash into other snakes
     for(const o of this.snakes){
       if(o.id===s.id||!o.alive)continue;
@@ -286,6 +302,7 @@ class LocalGame {
     s.botTimer-=dt; if(s.botTimer>0) return; s.botTimer=0.3+Math.random()*0.4;
     const h=s.segments[0], wall=this.MAP_SIZE/2-250;
     if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=true;return;}
+    if(this._fleeShrinkZone(s)) return;
     let cl=null,cSq=450*450;
     for(const f of this.food){const dx=f.x-h.x;if(dx>450||dx<-450)continue;const dy=f.y-h.y;if(dy>450||dy<-450)continue;const d2=dx*dx+dy*dy;if(d2<cSq){cSq=d2;cl=f;}}
     for(const o of this.snakes){
@@ -301,6 +318,7 @@ class LocalGame {
     s.botTimer-=dt; if(s.botTimer>0) return; s.botTimer=0.08;
     const h=s.segments[0], wall=this.MAP_SIZE/2-250;
     if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=false;return;}
+    if(this._fleeShrinkZone(s)) return;
     // Avoid body segments ahead
     for(const o of this.snakes){
       if(o.id===s.id||!o.alive)continue;
