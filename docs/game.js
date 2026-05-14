@@ -563,6 +563,8 @@
     document.getElementById('royaleModeBtn').classList.toggle('active', selectedLocalMode === 'royale');
     localStorage.setItem('selectedLocalMode', selectedLocalMode);
   }
+  // --- Game state (must be declared before frame loop touches them) ---
+  let snakes = [], food = [], megaOrbs = [], particles = [];
   let prevSnakes = []; // previous frame snakes for interpolation
   let interpT = 1; // interpolation factor 0→1 between state updates
   // Continuously-smoothed display positions (per-snake, per-segment)
@@ -1486,26 +1488,33 @@
 
   function drawRoyaleRing(cx, cy) {
     if (!localGame || localGame.mode !== 'royale') return;
-    const midX = canvas.width / 2;
-    const midY = canvas.height / 2;
-    const scaledRadius = localGame.safeRadius * zoom;
-    const pulse = 1 + Math.sin(localGame.shrinkPulse) * 0.08;
-    ctx.strokeStyle = 'rgba(255, 176, 74, 0.35)';
-    ctx.lineWidth = 5;
-    ctx.setLineDash([10, 12]);
-    ctx.lineDashOffset = -animTime * 18;
+    // World origin projected to canvas (we're already inside the zoom transform,
+    // so radius is in world units — no extra zoom multiplier).
+    const ox = canvas.width / 2 - cx;
+    const oy = canvas.height / 2 - cy;
+    const r = localGame.safeRadius;
+    const pulse = 1 + Math.sin(localGame.shrinkPulse) * 0.06;
+    // Danger fill — everything outside the safe zone is deadly.
+    // Use even-odd fill so we paint a ring from the canvas edge to the safe radius.
+    const halfW = canvas.width / (2 * zoom);
+    const halfH = canvas.height / (2 * zoom);
+    const left = cx - halfW - 200, top = cy - halfH - 200;
+    const right = cx + halfW + 200, bottom = cy + halfH + 200;
+    ctx.fillStyle = 'rgba(180, 30, 30, 0.18)';
     ctx.beginPath();
-    ctx.arc(midX, midY, scaledRadius * pulse, 0, Math.PI * 2);
+    ctx.rect(left - cx + canvas.width/2, top - cy + canvas.height/2,
+             right - left, bottom - top);
+    ctx.arc(ox, oy, r * pulse, 0, Math.PI * 2, true); // hole: counter-clockwise
+    ctx.fill('evenodd');
+    // Safe-zone boundary
+    ctx.strokeStyle = 'rgba(255, 180, 80, 0.85)';
+    ctx.lineWidth = 4 / zoom;
+    ctx.setLineDash([14 / zoom, 14 / zoom]);
+    ctx.lineDashOffset = -animTime * 24;
+    ctx.beginPath();
+    ctx.arc(ox, oy, r * pulse, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = 'rgba(255, 176, 74, 0.08)';
-    ctx.beginPath();
-    ctx.arc(midX, midY, scaledRadius * pulse, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.font = 'bold 13px "Segoe UI",sans-serif';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
-    ctx.textAlign = 'center';
-    ctx.fillText('SAFE ZONE', midX, midY - scaledRadius * pulse - 18);
   }
 
   function drawFood(cx,cy) {
