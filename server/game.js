@@ -686,7 +686,9 @@ class RoomManager {
     this.createRoom('room-1', 'Neon Arena', { mode: 'solo' });
     this.createRoom('room-2', 'Team Battle', { mode: 'team', teamSize: 2, maxTeams: 8 });
 
-    this.wss = new WebSocket.Server({ server: httpServer });
+    // noServer mode: upgrade routing is handled in index.js so multiple
+    // games (snake, click-battle) can share one Render service.
+    this.wss = new WebSocket.Server({ noServer: true });
     this.wss.on('connection', (ws, req) => this.onConnection(ws, req));
 
     setInterval(() => {
