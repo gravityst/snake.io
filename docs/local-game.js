@@ -21,6 +21,11 @@ class LocalGame {
     this.shrinkDelay = 10;
     this.shrinkRate = 22;
     this.shrinkPulse = 0;
+    // Battle Royale: zone center drifts smoothly toward the player so the
+    // arena slowly chases you. Tunable speed in world-units/sec.
+    this.safeCenterX = 0;
+    this.safeCenterY = 0;
+    this.zoneDriftSpeed = 38;
 
     this.snakes = [];
     this.food = [];
@@ -135,13 +140,34 @@ class LocalGame {
     // Collisions
     this._checkCollisions();
 
-    // Royal Gauntlet safe zone
+    // Battle Royale: smooth drift toward player + steady shrink, NO pulse
     if (this.mode === 'royale') {
+      // Drift zone center toward the player at a steady, calm rate
+      const player = this.snakes.find(s => s.id === this.playerId);
+      if (player && player.alive && player.segments.length > 0) {
+        const tx = player.segments[0].x;
+        const ty = player.segments[0].y;
+        const dx = tx - this.safeCenterX;
+        const dy = ty - this.safeCenterY;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if (d > 1) {
+          // Cap how far the center can wander from origin so the arena
+          // never slips off the map.
+          const maxOffset = this.MAP_SIZE / 2 - this.safeRadius - 100;
+          const step = Math.min(d, this.zoneDriftSpeed * dt);
+          let nx = this.safeCenterX + (dx/d) * step;
+          let ny = this.safeCenterY + (dy/d) * step;
+          const off = Math.sqrt(nx*nx + ny*ny);
+          if (off > maxOffset && maxOffset > 0) { nx *= maxOffset/off; ny *= maxOffset/off; }
+          this.safeCenterX = nx;
+          this.safeCenterY = ny;
+        }
+      }
       this.shrinkDelay = Math.max(0, this.shrinkDelay - dt);
       if (this.shrinkDelay <= 0) {
-        this.safeRadius = Math.max(600, this.safeRadius - this.shrinkRate * dt);
-        this.shrinkPulse = (this.shrinkPulse + dt * 2) % (Math.PI * 2);
+        this.safeRadius = Math.max(450, this.safeRadius - this.shrinkRate * dt);
       }
+      this.shrinkPulse = 0; // no bobbing
     }
 
     // Respawn dead bots
@@ -166,7 +192,9 @@ class LocalGame {
     const h = this.MAP_SIZE/2;
     if (head.x<-h||head.x>h||head.y<-h||head.y>h) { this._kill(snake, null); return; }
     if (this.mode === 'royale') {
-      const dist = Math.sqrt(head.x * head.x + head.y * head.y);
+      const dx = head.x - this.safeCenterX;
+      const dy = head.y - this.safeCenterY;
+      const dist = Math.sqrt(dx*dx + dy*dy);
       if (dist > this.safeRadius) { this._kill(snake, null); return; }
     }
     while (snake.segments.length >= 2) {
@@ -255,12 +283,14 @@ class LocalGame {
   // Margin scales with snake length so longer bots U-turn earlier.
   _fleeShrinkZone(s) {
     if (this.mode !== 'royale') return false;
-    const h = s.segments[0];
-    const dist = Math.sqrt(h.x * h.x + h.y * h.y);
-    const margin = 80 + s.segments.length * 1.5;
-    if (dist > this.safeRadius - margin) {
-      s.targetAngle = Math.atan2(-h.y, -h.x);
-      s.boosting = dist > this.safeRadius - margin * 0.4 && s.score > 10;
+    // Reference the moving zone center
+    const cx = this.safeCenterX, cy = this.safeCenterY;
+    const h0 = s.segments[0];
+    const ddx = h0.x - cx, ddy = h0.y - cy;
+    const dd = Math.sqrt(ddx*ddx + ddy*ddy);
+    if (dd > this.safeRadius - 220) {
+      s.targetAngle = Math.atan2(cy - h0.y, cx - h0.x);
+      s.boosting = dd > this.safeRadius - 60 && s.score > 8;
       return true;
     }
     return false;

@@ -141,6 +141,24 @@
     { name: 'Mushroom' },
   ];
 
+  // Small helpers for 3D-style shading on accessories
+  function _radialGrad(ctx, x, y, ri, ro, cInner, cOuter) {
+    const g = ctx.createRadialGradient(x, y, ri, x, y, ro);
+    g.addColorStop(0, cInner); g.addColorStop(1, cOuter);
+    return g;
+  }
+  function _linearGrad(ctx, x1, y1, x2, y2, c1, c2) {
+    const g = ctx.createLinearGradient(x1, y1, x2, y2);
+    g.addColorStop(0, c1); g.addColorStop(1, c2);
+    return g;
+  }
+  function _shineDot(ctx, x, y, rad, color = 'rgba(255,255,255,0.85)') {
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
   function drawAccessory(ctx, accId, hx, hy, headR, angle) {
     if (accId <= 0 || accId >= ACCESSORIES.length) return;
     const cos = Math.cos(angle), sin = Math.sin(angle);
@@ -150,173 +168,566 @@
     ctx.rotate(angle - Math.PI/2); // rotate so "up" is away from movement direction
     const r = headR;
 
-    if (accId === 1) { // Crown
-      ctx.fillStyle = '#fc0';
+    if (accId === 1) { // Crown — 3D gold with jewels
+      // Soft drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath();
+      ctx.ellipse(0, -r*0.45, r*0.65, r*0.12, 0, 0, Math.PI*2); ctx.fill();
+      // Body — vertical gold gradient (highlight top, dark base)
+      const gold = _linearGrad(ctx, 0, -r*1.3, 0, -r*0.5, '#fff5b3', '#a87a00');
+      ctx.fillStyle = gold;
       ctx.beginPath();
       ctx.moveTo(-r*0.6, -r*0.5);
-      ctx.lineTo(-r*0.6, -r*1.2);
-      ctx.lineTo(-r*0.3, -r*0.9);
-      ctx.lineTo(0, -r*1.3);
-      ctx.lineTo(r*0.3, -r*0.9);
-      ctx.lineTo(r*0.6, -r*1.2);
+      ctx.lineTo(-r*0.6, -r*1.05);
+      ctx.lineTo(-r*0.3, -r*0.85);
+      ctx.lineTo(0, -r*1.30);
+      ctx.lineTo(r*0.3, -r*0.85);
+      ctx.lineTo(r*0.6, -r*1.05);
       ctx.lineTo(r*0.6, -r*0.5);
       ctx.closePath(); ctx.fill();
-      ctx.strokeStyle='#da0';ctx.lineWidth=1;ctx.stroke();
-    } else if (accId === 2) { // Top Hat
-      ctx.fillStyle = '#111';
-      ctx.fillRect(-r*0.5, -r*1.6, r*1.0, r*0.9);
-      ctx.fillRect(-r*0.7, -r*0.7, r*1.4, r*0.2);
-      ctx.strokeStyle='#444';ctx.lineWidth=1;
-      ctx.strokeRect(-r*0.5, -r*1.6, r*1.0, r*0.9);
-      ctx.fillStyle='#0ff';ctx.fillRect(-r*0.45, -r*0.9, r*0.9, r*0.12);
-    } else if (accId === 3) { // Sunglasses
-      // Draw shades over the eye positions
-      const lx=-r*0.35, rx=r*0.35, ey=r*0.15;
-      ctx.fillStyle='rgba(20,20,20,0.9)';
-      // Left lens
-      ctx.beginPath();ctx.arc(lx,ey,r*0.28,0,Math.PI*2);ctx.fill();
-      // Right lens
-      ctx.beginPath();ctx.arc(rx,ey,r*0.28,0,Math.PI*2);ctx.fill();
-      // Bridge
-      ctx.strokeStyle='#555';ctx.lineWidth=r*0.08;
-      ctx.beginPath();ctx.moveTo(lx+r*0.25,ey);ctx.lineTo(rx-r*0.25,ey);ctx.stroke();
-      // Rims
-      ctx.strokeStyle='#888';ctx.lineWidth=r*0.06;
-      ctx.beginPath();ctx.arc(lx,ey,r*0.28,0,Math.PI*2);ctx.stroke();
-      ctx.beginPath();ctx.arc(rx,ey,r*0.28,0,Math.PI*2);ctx.stroke();
-    } else if (accId === 4) { // Halo
-      ctx.strokeStyle='#fc0';ctx.lineWidth=2;ctx.globalAlpha=0.8;
-      ctx.beginPath();ctx.ellipse(0, -r*1.3, r*0.55, r*0.15, 0, 0, Math.PI*2);ctx.stroke();
-      ctx.globalAlpha=1;
-    } else if (accId === 5) { // Party Hat
-      const grad = ctx.createLinearGradient(0,-r*1.8,0,-r*0.5);
-      grad.addColorStop(0,'#f0f');grad.addColorStop(0.5,'#0ff');grad.addColorStop(1,'#ff0');
-      ctx.fillStyle=grad;
-      ctx.beginPath();ctx.moveTo(0,-r*1.8);ctx.lineTo(-r*0.5,-r*0.5);ctx.lineTo(r*0.5,-r*0.5);ctx.closePath();ctx.fill();
-      ctx.fillStyle='#ff0';ctx.beginPath();ctx.arc(0,-r*1.8,r*0.15,0,Math.PI*2);ctx.fill();
-    } else if (accId === 6) { // Ninja Band
-      ctx.fillStyle='#333';ctx.fillRect(-r*0.8,-r*0.15,r*1.6,r*0.3);
-      ctx.fillStyle='#c00';
-      ctx.beginPath();ctx.moveTo(r*0.8,0);ctx.lineTo(r*1.3,-r*0.3);ctx.lineTo(r*1.1,r*0.1);ctx.closePath();ctx.fill();
-      ctx.beginPath();ctx.moveTo(r*0.8,0);ctx.lineTo(r*1.4,r*0.1);ctx.lineTo(r*1.0,r*0.3);ctx.closePath();ctx.fill();
-    } else if (accId === 7) { // Flower
-      const cols=['#f44','#f80','#ff0','#f0f','#f44'];
-      for(let i=0;i<5;i++){
-        ctx.fillStyle=cols[i];
-        const a=i*Math.PI*2/5-Math.PI/2;
-        ctx.beginPath();ctx.arc(Math.cos(a)*r*0.5,-r*1.0+Math.sin(a)*r*0.5,r*0.2,0,Math.PI*2);ctx.fill();
-      }
-      ctx.fillStyle='#ff0';ctx.beginPath();ctx.arc(0,-r*1.0,r*0.15,0,Math.PI*2);ctx.fill();
-    } else if (accId === 8) { // Antenna
-      ctx.strokeStyle='#888';ctx.lineWidth=2;
-      ctx.beginPath();ctx.moveTo(0,-r*0.5);ctx.quadraticCurveTo(r*0.2,-r*1.5,0,-r*1.8);ctx.stroke();
-      ctx.fillStyle='#0ff';ctx.beginPath();ctx.arc(0,-r*1.8,r*0.2,0,Math.PI*2);ctx.fill();
-    } else if (accId === 9) { // Bow Tie
-      ctx.fillStyle='#f44';
-      ctx.beginPath();ctx.moveTo(0,r*0.6);ctx.lineTo(-r*0.6,r*0.3);ctx.lineTo(-r*0.6,r*0.9);ctx.closePath();ctx.fill();
-      ctx.beginPath();ctx.moveTo(0,r*0.6);ctx.lineTo(r*0.6,r*0.3);ctx.lineTo(r*0.6,r*0.9);ctx.closePath();ctx.fill();
-      ctx.fillStyle='#d22';ctx.beginPath();ctx.arc(0,r*0.6,r*0.12,0,Math.PI*2);ctx.fill();
-    } else if (accId === 10) { // Wizard Hat
-      ctx.fillStyle='#228';
-      ctx.beginPath();ctx.moveTo(0,-r*2.2);ctx.lineTo(-r*0.7,-r*0.5);ctx.lineTo(r*0.7,-r*0.5);ctx.closePath();ctx.fill();
-      ctx.strokeStyle='#fc0';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-r*0.75,-r*0.5);ctx.lineTo(r*0.75,-r*0.5);ctx.stroke();
-      ctx.fillStyle='#fc0';ctx.beginPath();ctx.arc(0,-r*2.2,r*0.12,0,Math.PI*2);ctx.fill();
-    } else if (accId === 11) { // Cat Ears
-      ctx.fillStyle='#fa8';
-      ctx.beginPath();ctx.moveTo(-r*0.6,-r*0.3);ctx.lineTo(-r*0.45,-r*1.3);ctx.lineTo(-r*0.1,-r*0.5);ctx.closePath();ctx.fill();
-      ctx.beginPath();ctx.moveTo(r*0.6,-r*0.3);ctx.lineTo(r*0.45,-r*1.3);ctx.lineTo(r*0.1,-r*0.5);ctx.closePath();ctx.fill();
-      ctx.fillStyle='#f8c';
-      ctx.beginPath();ctx.moveTo(-r*0.5,-r*0.4);ctx.lineTo(-r*0.45,-r*1.0);ctx.lineTo(-r*0.2,-r*0.5);ctx.closePath();ctx.fill();
-      ctx.beginPath();ctx.moveTo(r*0.5,-r*0.4);ctx.lineTo(r*0.45,-r*1.0);ctx.lineTo(r*0.2,-r*0.5);ctx.closePath();ctx.fill();
-    } else if (accId === 12) { // Viking Horns
-      ctx.fillStyle='#ca8';
-      ctx.beginPath();ctx.moveTo(-r*0.5,-r*0.3);ctx.quadraticCurveTo(-r*1.2,-r*1.5,-r*0.8,-r*0.2);ctx.lineTo(-r*0.4,-r*0.5);ctx.closePath();ctx.fill();
-      ctx.beginPath();ctx.moveTo(r*0.5,-r*0.3);ctx.quadraticCurveTo(r*1.2,-r*1.5,r*0.8,-r*0.2);ctx.lineTo(r*0.4,-r*0.5);ctx.closePath();ctx.fill();
-    } else if (accId === 13) { // Fire
-      const cols=['#f80','#f44','#ff0'];
-      for(let i=0;i<5;i++){
-        const a=-Math.PI/2+(Math.random()-0.5)*1.2;
-        const h=r*0.8+Math.random()*r*0.8;
-        ctx.fillStyle=cols[Math.floor(Math.random()*3)];ctx.globalAlpha=0.6;
-        ctx.beginPath();ctx.arc(Math.cos(a)*r*0.3,-r*0.3+Math.sin(a)*h*0.5,r*0.25+Math.random()*r*0.15,0,Math.PI*2);ctx.fill();
-      }
-      ctx.globalAlpha=1;
-    } else if (accId === 14) { // Ice Crown
-      ctx.fillStyle='#aef';ctx.globalAlpha=0.8;
+      // Top highlight stroke (catches light)
+      ctx.strokeStyle = 'rgba(255,255,200,0.85)';
+      ctx.lineWidth = r*0.06;
       ctx.beginPath();
-      ctx.moveTo(-r*0.5,-r*0.5);ctx.lineTo(-r*0.4,-r*1.1);ctx.lineTo(-r*0.15,-r*0.7);
-      ctx.lineTo(0,-r*1.2);ctx.lineTo(r*0.15,-r*0.7);ctx.lineTo(r*0.4,-r*1.1);
-      ctx.lineTo(r*0.5,-r*0.5);ctx.closePath();ctx.fill();
-      ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke();ctx.globalAlpha=1;
-    } else if (accId === 15) { // Bandana
-      ctx.fillStyle='#c00';ctx.fillRect(-r*0.8,-r*0.2,r*1.6,r*0.25);
-      ctx.fillStyle='#fff';
-      ctx.beginPath();ctx.arc(0,-r*0.075,r*0.08,0,Math.PI*2);ctx.fill();
-    } else if (accId === 16) { // Stars
-      ctx.fillStyle='#ff0';ctx.globalAlpha=0.8;
-      const starPos=[[-r*0.5,-r*1.2],[r*0.4,-r*1.4],[r*0.1,-r*1.0]];
-      for(const [sx,sy] of starPos){
-        ctx.beginPath();
-        for(let i=0;i<5;i++){
-          const a=i*Math.PI*2/5-Math.PI/2;const ir=r*0.06,or=r*0.15;
-          ctx.lineTo(sx+Math.cos(a)*or,sy+Math.sin(a)*or);
-          const a2=a+Math.PI/5;
-          ctx.lineTo(sx+Math.cos(a2)*ir,sy+Math.sin(a2)*ir);
-        }
-        ctx.closePath();ctx.fill();
+      ctx.moveTo(-r*0.55, -r*1.0); ctx.lineTo(-r*0.32, -r*0.83);
+      ctx.moveTo(-r*0.05, -r*1.25); ctx.lineTo(0.05, -r*1.25);
+      ctx.moveTo(r*0.55, -r*1.0); ctx.lineTo(r*0.32, -r*0.83);
+      ctx.stroke();
+      // Inner band shadow
+      ctx.fillStyle = 'rgba(120,80,0,0.35)';
+      ctx.fillRect(-r*0.58, -r*0.62, r*1.16, r*0.10);
+      // Outer crisp rim
+      ctx.strokeStyle = '#7a5400';
+      ctx.lineWidth = r*0.04;
+      ctx.beginPath();
+      ctx.moveTo(-r*0.6, -r*0.5);
+      ctx.lineTo(-r*0.6, -r*1.05);
+      ctx.lineTo(-r*0.3, -r*0.85);
+      ctx.lineTo(0, -r*1.30);
+      ctx.lineTo(r*0.3, -r*0.85);
+      ctx.lineTo(r*0.6, -r*1.05);
+      ctx.lineTo(r*0.6, -r*0.5);
+      ctx.closePath();
+      ctx.stroke();
+      // Jewels — red ruby, blue sapphire, green emerald with shine
+      const jewels = [
+        { x: -r*0.3, y: -r*0.72, c1: '#ffaaaa', c2: '#cc0033' },
+        { x:  0,     y: -r*0.72, c1: '#aaddff', c2: '#0044aa' },
+        { x:  r*0.3, y: -r*0.72, c1: '#aaffaa', c2: '#117733' },
+      ];
+      for (const j of jewels) {
+        ctx.fillStyle = _radialGrad(ctx, j.x - r*0.03, j.y - r*0.03, r*0.01, r*0.10, j.c1, j.c2);
+        ctx.beginPath(); ctx.arc(j.x, j.y, r*0.09, 0, Math.PI*2); ctx.fill();
+        _shineDot(ctx, j.x - r*0.04, j.y - r*0.04, r*0.025);
       }
-      ctx.globalAlpha=1;
-    } else if (accId === 17) { // Monocle
-      ctx.strokeStyle='#fc0';ctx.lineWidth=r*0.07;
-      ctx.beginPath();ctx.arc(r*0.3,r*0.15,r*0.25,0,Math.PI*2);ctx.stroke();
-      ctx.strokeStyle='#fc0';ctx.lineWidth=r*0.04;
-      ctx.beginPath();ctx.moveTo(r*0.3,r*0.4);ctx.lineTo(r*0.2,r*0.9);ctx.stroke();
-    } else if (accId === 18) { // Pirate Hat
-      ctx.fillStyle='#222';
-      ctx.beginPath();ctx.moveTo(-r*0.8,-r*0.4);ctx.quadraticCurveTo(0,-r*1.6,r*0.8,-r*0.4);ctx.lineTo(-r*0.8,-r*0.4);ctx.closePath();ctx.fill();
-      ctx.strokeStyle='#fc0';ctx.lineWidth=1;ctx.stroke();
-      // Skull
-      ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(0,-r*0.8,r*0.15,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle='#222';ctx.beginPath();ctx.arc(-r*0.05,-r*0.83,r*0.04,0,Math.PI*2);ctx.fill();
-      ctx.beginPath();ctx.arc(r*0.05,-r*0.83,r*0.04,0,Math.PI*2);ctx.fill();
-    } else if (accId === 19) { // Angel Wings
-      ctx.fillStyle='#fff';ctx.globalAlpha=0.5;
+    } else if (accId === 2) { // Top Hat — glossy black with white shine band
+      // Drop shadow
+      ctx.fillStyle='rgba(0,0,0,0.3)';
+      ctx.beginPath(); ctx.ellipse(0, -r*0.55, r*0.75, r*0.10, 0, 0, Math.PI*2); ctx.fill();
+      // Brim
+      const brim = _linearGrad(ctx, 0, -r*0.8, 0, -r*0.5, '#2a2a2a', '#0a0a0a');
+      ctx.fillStyle = brim;
+      ctx.beginPath();
+      ctx.ellipse(0, -r*0.6, r*0.78, r*0.16, 0, 0, Math.PI*2); ctx.fill();
+      // Crown — vertical gradient
+      const body = _linearGrad(ctx, 0, -r*1.7, 0, -r*0.7, '#3a3a3a', '#0d0d0d');
+      ctx.fillStyle = body;
+      ctx.fillRect(-r*0.5, -r*1.65, r*1.0, r*0.95);
+      // Top highlight (subtle white reflection on left)
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fillRect(-r*0.42, -r*1.6, r*0.10, r*0.85);
+      // Brim top edge highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.20)';
+      ctx.fillRect(-r*0.5, -r*0.74, r*1.0, r*0.04);
+      // Cyan ribbon with inner shadow
+      const ribbon = _linearGrad(ctx, 0, -r*0.95, 0, -r*0.75, '#5eead4', '#1ea890');
+      ctx.fillStyle = ribbon;
+      ctx.fillRect(-r*0.5, -r*0.92, r*1.0, r*0.16);
+      ctx.fillStyle='rgba(0,0,0,0.15)';
+      ctx.fillRect(-r*0.5, -r*0.78, r*1.0, r*0.02);
+    } else if (accId === 3) { // Sunglasses — glossy black lenses with chrome rims
+      const lx=-r*0.35, rx=r*0.35, ey=r*0.15;
+      // Lens base — dark with a radial highlight (suggests reflective glass)
+      const lensL = _radialGrad(ctx, lx - r*0.08, ey - r*0.08, r*0.01, r*0.3, 'rgba(80,80,80,0.95)', 'rgba(5,5,5,0.95)');
+      const lensR = _radialGrad(ctx, rx - r*0.08, ey - r*0.08, r*0.01, r*0.3, 'rgba(80,80,80,0.95)', 'rgba(5,5,5,0.95)');
+      ctx.fillStyle = lensL; ctx.beginPath(); ctx.arc(lx, ey, r*0.28, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = lensR; ctx.beginPath(); ctx.arc(rx, ey, r*0.28, 0, Math.PI*2); ctx.fill();
+      // Chrome rims
+      ctx.strokeStyle = _radialGrad(ctx, 0, ey, 0, r*0.4, '#fff', '#666');
+      ctx.lineWidth = r*0.08;
+      ctx.beginPath(); ctx.arc(lx, ey, r*0.28, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(rx, ey, r*0.28, 0, Math.PI*2); ctx.stroke();
+      // Bridge
+      ctx.lineWidth = r*0.1;
+      ctx.beginPath(); ctx.moveTo(lx+r*0.25, ey); ctx.lineTo(rx-r*0.25, ey); ctx.stroke();
+      // Shine highlights on lenses
+      _shineDot(ctx, lx - r*0.10, ey - r*0.12, r*0.06);
+      _shineDot(ctx, rx - r*0.10, ey - r*0.12, r*0.06);
+      _shineDot(ctx, lx + r*0.08, ey + r*0.06, r*0.03, 'rgba(255,255,255,0.55)');
+      _shineDot(ctx, rx + r*0.08, ey + r*0.06, r*0.03, 'rgba(255,255,255,0.55)');
+    } else if (accId === 4) { // Halo — luminous golden ring
+      // Outer glow
+      const glow = _radialGrad(ctx, 0, -r*1.3, r*0.4, r*0.85, 'rgba(255,220,80,0.45)', 'rgba(255,220,80,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.ellipse(0, -r*1.3, r*0.85, r*0.5, 0, 0, Math.PI*2); ctx.fill();
+      // Outer ring (gold)
+      ctx.strokeStyle = '#fc0';
+      ctx.lineWidth = r*0.10;
+      ctx.beginPath(); ctx.ellipse(0, -r*1.3, r*0.55, r*0.15, 0, 0, Math.PI*2); ctx.stroke();
+      // Inner ring (bright shine)
+      ctx.strokeStyle = 'rgba(255,255,220,0.95)';
+      ctx.lineWidth = r*0.04;
+      ctx.beginPath(); ctx.ellipse(0, -r*1.3, r*0.55, r*0.15, 0, 0, Math.PI*2); ctx.stroke();
+    } else if (accId === 5) { // Party Hat — striped cone with pom and streamers
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(0, -r*1.85);
+      ctx.lineTo(-r*0.55, -r*0.45);
+      ctx.lineTo(r*0.55, -r*0.45);
+      ctx.closePath();
+      ctx.clip();
+      // Stripes
+      const stripes = ['#5eead4','#a78bfa','#fbbf24','#fb7185','#5eead4','#a78bfa'];
+      for (let i = 0; i < stripes.length; i++) {
+        ctx.fillStyle = stripes[i];
+        const y = -r*1.85 + (i / stripes.length) * (r*1.4);
+        ctx.fillRect(-r, y, r*2, (r*1.4)/stripes.length + 1);
+      }
+      // Subtle vertical shadow on left for 3D cone
+      const cone = _linearGrad(ctx, -r*0.55, 0, r*0.55, 0, 'rgba(0,0,0,0.30)', 'rgba(255,255,255,0.25)');
+      ctx.fillStyle = cone;
+      ctx.fillRect(-r, -r*1.85, r*2, r*1.4);
+      ctx.restore();
+      // Crisp outline
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.lineWidth = r*0.04;
+      ctx.beginPath();
+      ctx.moveTo(0, -r*1.85);
+      ctx.lineTo(-r*0.55, -r*0.45);
+      ctx.lineTo(r*0.55, -r*0.45);
+      ctx.closePath();
+      ctx.stroke();
+      // Pom-pom (3D ball)
+      const pom = _radialGrad(ctx, -r*0.02, -r*1.88, r*0.01, r*0.18, '#fff', '#fbbf24');
+      ctx.fillStyle = pom;
+      ctx.beginPath(); ctx.arc(0, -r*1.85, r*0.16, 0, Math.PI*2); ctx.fill();
+      _shineDot(ctx, -r*0.05, -r*1.90, r*0.05);
+    } else if (accId === 6) { // Ninja Band — cloth with sigil and tails
+      // Tails behind
+      ctx.fillStyle = '#7f1414';
+      ctx.beginPath(); ctx.moveTo(r*0.7, 0); ctx.lineTo(r*1.35, -r*0.35); ctx.lineTo(r*1.15, r*0.08); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(r*0.7, 0); ctx.lineTo(r*1.45, r*0.12); ctx.lineTo(r*1.05, r*0.32); ctx.closePath(); ctx.fill();
+      // Band gradient (cloth)
+      const cloth = _linearGrad(ctx, 0, -r*0.18, 0, r*0.18, '#2a2a2a', '#0e0e0e');
+      ctx.fillStyle = cloth;
+      ctx.fillRect(-r*0.85, -r*0.18, r*1.7, r*0.35);
+      // Stitches / weave hint
+      ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+      ctx.lineWidth = 1;
+      for (let i = -r*0.8; i < r*0.8; i += r*0.18) {
+        ctx.beginPath(); ctx.moveTo(i, -r*0.16); ctx.lineTo(i, r*0.16); ctx.stroke();
+      }
+      // Red sigil dot
+      const sig = _radialGrad(ctx, -r*0.02, -r*0.02, r*0.005, r*0.10, '#ffaaaa', '#a30000');
+      ctx.fillStyle = sig;
+      ctx.beginPath(); ctx.arc(0, 0, r*0.09, 0, Math.PI*2); ctx.fill();
+      _shineDot(ctx, -r*0.03, -r*0.03, r*0.025);
+    } else if (accId === 7) { // Flower — 3D petals with center
+      const petalColors = [['#ffe4e6','#fb7185'],['#fef3c7','#fbbf24'],['#dbeafe','#3b82f6'],['#fce7f3','#ec4899'],['#dcfce7','#22c55e']];
+      for (let i = 0; i < 5; i++) {
+        const a = i*Math.PI*2/5 - Math.PI/2;
+        const px = Math.cos(a)*r*0.40;
+        const py = -r*1.0 + Math.sin(a)*r*0.40;
+        const [c1, c2] = petalColors[i];
+        const g = _radialGrad(ctx, px - r*0.05, py - r*0.05, r*0.005, r*0.22, c1, c2);
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(px, py, r*0.20, 0, Math.PI*2); ctx.fill();
+      }
+      // Center — bright golden bead
+      const cen = _radialGrad(ctx, -r*0.02, -r*1.02, r*0.005, r*0.16, '#fff7a8', '#b45309');
+      ctx.fillStyle = cen;
+      ctx.beginPath(); ctx.arc(0, -r*1.0, r*0.15, 0, Math.PI*2); ctx.fill();
+      _shineDot(ctx, -r*0.04, -r*1.04, r*0.04);
+    } else if (accId === 8) { // Antenna — metallic rod with neon orb
+      // Rod (chrome)
+      ctx.strokeStyle = _linearGrad(ctx, -r*0.05, 0, r*0.05, 0, '#fff', '#777');
+      ctx.lineWidth = r*0.10;
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(0, -r*0.5); ctx.quadraticCurveTo(r*0.18, -r*1.45, 0, -r*1.85); ctx.stroke();
+      ctx.lineCap = 'butt';
+      // Orb — bright cyan with shine
+      const orb = _radialGrad(ctx, -r*0.05, -r*1.90, r*0.02, r*0.22, '#ccffff', '#0a8aa8');
+      ctx.fillStyle = orb;
+      ctx.beginPath(); ctx.arc(0, -r*1.85, r*0.20, 0, Math.PI*2); ctx.fill();
+      _shineDot(ctx, -r*0.07, -r*1.92, r*0.06);
+      // Outer glow
+      const glow = _radialGrad(ctx, 0, -r*1.85, r*0.18, r*0.42, 'rgba(94,234,212,0.5)', 'rgba(94,234,212,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(0, -r*1.85, r*0.4, 0, Math.PI*2); ctx.fill();
+    } else if (accId === 9) { // Bow Tie — shiny ribbon with knot
+      // Drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath(); ctx.ellipse(0, r*0.95, r*0.55, r*0.08, 0, 0, Math.PI*2); ctx.fill();
+      const ribbon = _linearGrad(ctx, 0, r*0.35, 0, r*0.9, '#ff8d9b', '#b91c1c');
+      ctx.fillStyle = ribbon;
       // Left wing
-      ctx.beginPath();ctx.moveTo(-r*0.4,0);ctx.quadraticCurveTo(-r*1.5,-r*0.3,-r*0.8,-r*0.8);ctx.quadraticCurveTo(-r*0.3,-r*0.4,-r*0.4,0);ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(-r*0.06, r*0.6);
+      ctx.quadraticCurveTo(-r*0.55, r*0.18, -r*0.62, r*0.4);
+      ctx.lineTo(-r*0.62, r*0.85);
+      ctx.quadraticCurveTo(-r*0.55, r*1.05, -r*0.06, r*0.65);
+      ctx.closePath(); ctx.fill();
       // Right wing
-      ctx.beginPath();ctx.moveTo(r*0.4,0);ctx.quadraticCurveTo(r*1.5,-r*0.3,r*0.8,-r*0.8);ctx.quadraticCurveTo(r*0.3,-r*0.4,r*0.4,0);ctx.fill();
-      ctx.globalAlpha=1;
-    } else if (accId === 20) { // Headphones
-      ctx.strokeStyle='#333';ctx.lineWidth=r*0.12;
-      ctx.beginPath();ctx.arc(0,-r*0.1,r*0.7,Math.PI+0.3,Math.PI*2-0.3);ctx.stroke();
-      ctx.fillStyle='#444';
-      ctx.beginPath();ctx.arc(-r*0.65,r*0.15,r*0.2,0,Math.PI*2);ctx.fill();
-      ctx.beginPath();ctx.arc(r*0.65,r*0.15,r*0.2,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle='#0ff';
-      ctx.beginPath();ctx.arc(-r*0.65,r*0.15,r*0.1,0,Math.PI*2);ctx.fill();
-      ctx.beginPath();ctx.arc(r*0.65,r*0.15,r*0.1,0,Math.PI*2);ctx.fill();
-    } else if (accId === 21) { // Chef Hat
-      ctx.fillStyle='#fff';
-      ctx.beginPath();ctx.arc(0,-r*1.0,r*0.5,0,Math.PI*2);ctx.fill();
-      ctx.fillRect(-r*0.5,-r*1.0,r*1.0,r*0.5);
-      ctx.fillRect(-r*0.55,-r*0.5,r*1.1,r*0.12);
-    } else if (accId === 22) { // Goggles
-      ctx.fillStyle='rgba(0,200,255,0.3)';
-      ctx.beginPath();ctx.arc(-r*0.33,r*0.1,r*0.25,0,Math.PI*2);ctx.fill();
-      ctx.beginPath();ctx.arc(r*0.33,r*0.1,r*0.25,0,Math.PI*2);ctx.fill();
-      ctx.strokeStyle='#888';ctx.lineWidth=r*0.06;
-      ctx.beginPath();ctx.arc(-r*0.33,r*0.1,r*0.25,0,Math.PI*2);ctx.stroke();
-      ctx.beginPath();ctx.arc(r*0.33,r*0.1,r*0.25,0,Math.PI*2);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(-r*0.08,r*0.1);ctx.lineTo(r*0.08,r*0.1);ctx.stroke();
-      ctx.strokeStyle='#666';ctx.lineWidth=r*0.04;
-      ctx.beginPath();ctx.arc(0,-r*0.1,r*0.7,Math.PI+0.5,Math.PI*2-0.5);ctx.stroke();
-    } else if (accId === 23) { // Mushroom
-      ctx.fillStyle='#f44';
-      ctx.beginPath();ctx.arc(0,-r*0.9,r*0.5,Math.PI,0);ctx.lineTo(r*0.2,-r*0.5);ctx.lineTo(-r*0.2,-r*0.5);ctx.closePath();ctx.fill();
-      ctx.fillStyle='#fff';
-      ctx.beginPath();ctx.arc(-r*0.2,-r*1.0,r*0.1,0,Math.PI*2);ctx.fill();
-      ctx.beginPath();ctx.arc(r*0.15,-r*0.85,r*0.08,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle='#eda';ctx.fillRect(-r*0.15,-r*0.5,r*0.3,r*0.3);
+      ctx.beginPath();
+      ctx.moveTo(r*0.06, r*0.6);
+      ctx.quadraticCurveTo(r*0.55, r*0.18, r*0.62, r*0.4);
+      ctx.lineTo(r*0.62, r*0.85);
+      ctx.quadraticCurveTo(r*0.55, r*1.05, r*0.06, r*0.65);
+      ctx.closePath(); ctx.fill();
+      // Highlight stripe on wings
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = r*0.04;
+      ctx.beginPath(); ctx.moveTo(-r*0.5, r*0.5); ctx.lineTo(-r*0.15, r*0.62); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(r*0.5, r*0.5); ctx.lineTo(r*0.15, r*0.62); ctx.stroke();
+      // Knot
+      const knot = _radialGrad(ctx, -r*0.02, r*0.6, r*0.01, r*0.17, '#fff', '#7f1d1d');
+      ctx.fillStyle = knot;
+      ctx.beginPath(); ctx.arc(0, r*0.62, r*0.14, 0, Math.PI*2); ctx.fill();
+      _shineDot(ctx, -r*0.04, r*0.57, r*0.04);
+    } else if (accId === 10) { // Wizard Hat — purple cone with star and band
+      // Cone body
+      const cone = _linearGrad(ctx, -r*0.3, 0, r*0.6, 0, '#3b1d8a', '#1e0d4a');
+      ctx.fillStyle = cone;
+      ctx.beginPath();
+      ctx.moveTo(0, -r*2.2);
+      ctx.lineTo(-r*0.7, -r*0.45);
+      ctx.lineTo(r*0.7, -r*0.45);
+      ctx.closePath(); ctx.fill();
+      // Top highlight ridge
+      ctx.strokeStyle = 'rgba(255,255,255,0.20)';
+      ctx.lineWidth = r*0.05;
+      ctx.beginPath();
+      ctx.moveTo(0, -r*2.2);
+      ctx.lineTo(-r*0.30, -r*0.65);
+      ctx.stroke();
+      // Outline
+      ctx.strokeStyle = '#150729';
+      ctx.lineWidth = r*0.04;
+      ctx.beginPath();
+      ctx.moveTo(0, -r*2.2);
+      ctx.lineTo(-r*0.7, -r*0.45);
+      ctx.lineTo(r*0.7, -r*0.45);
+      ctx.closePath(); ctx.stroke();
+      // Brim band
+      const band = _linearGrad(ctx, 0, -r*0.55, 0, -r*0.35, '#ffd166', '#b8860b');
+      ctx.fillStyle = band;
+      ctx.fillRect(-r*0.78, -r*0.55, r*1.56, r*0.16);
+      ctx.strokeStyle = 'rgba(255,255,200,0.5)'; ctx.lineWidth = r*0.02;
+      ctx.beginPath(); ctx.moveTo(-r*0.78, -r*0.52); ctx.lineTo(r*0.78, -r*0.52); ctx.stroke();
+      // Star on top
+      ctx.fillStyle = '#fde047';
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const a = i * Math.PI * 2 / 5 - Math.PI/2;
+        const ir = r*0.06, or = r*0.14;
+        ctx.lineTo(0 + Math.cos(a)*or, -r*2.15 + Math.sin(a)*or);
+        const a2 = a + Math.PI/5;
+        ctx.lineTo(0 + Math.cos(a2)*ir, -r*2.15 + Math.sin(a2)*ir);
+      }
+      ctx.closePath(); ctx.fill();
+      _shineDot(ctx, -r*0.04, -r*2.18, r*0.04, 'rgba(255,255,255,0.8)');
+    } else if (accId === 11) { // Cat Ears — fluffy ears with pink inner shading
+      // Outer ears
+      const outer = _linearGrad(ctx, 0, -r*1.3, 0, -r*0.3, '#fbcfa0', '#a86a3a');
+      ctx.fillStyle = outer;
+      ctx.beginPath(); ctx.moveTo(-r*0.6, -r*0.30); ctx.lineTo(-r*0.45, -r*1.30); ctx.lineTo(-r*0.10, -r*0.50); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(r*0.6, -r*0.30); ctx.lineTo(r*0.45, -r*1.30); ctx.lineTo(r*0.10, -r*0.50); ctx.closePath(); ctx.fill();
+      // Inner pink
+      const inner = _linearGrad(ctx, 0, -r*1.0, 0, -r*0.4, '#ffb6c1', '#c2185b');
+      ctx.fillStyle = inner;
+      ctx.beginPath(); ctx.moveTo(-r*0.50, -r*0.40); ctx.lineTo(-r*0.45, -r*1.00); ctx.lineTo(-r*0.20, -r*0.50); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(r*0.50, -r*0.40); ctx.lineTo(r*0.45, -r*1.00); ctx.lineTo(r*0.20, -r*0.50); ctx.closePath(); ctx.fill();
+      // Tiny shine on the tip
+      _shineDot(ctx, -r*0.42, -r*1.18, r*0.05);
+      _shineDot(ctx,  r*0.42, -r*1.18, r*0.05);
+    } else if (accId === 12) { // Viking Horns — bone with banded shading
+      const horn = _linearGrad(ctx, 0, -r*1.5, 0, -r*0.2, '#fff2d6', '#7a5d2a');
+      ctx.fillStyle = horn;
+      ctx.beginPath();
+      ctx.moveTo(-r*0.5, -r*0.3); ctx.quadraticCurveTo(-r*1.25, -r*1.55, -r*0.78, -r*0.18); ctx.lineTo(-r*0.40, -r*0.5); ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(r*0.5, -r*0.3); ctx.quadraticCurveTo(r*1.25, -r*1.55, r*0.78, -r*0.18); ctx.lineTo(r*0.40, -r*0.5); ctx.closePath();
+      ctx.fill();
+      // Bands
+      ctx.strokeStyle = 'rgba(80,55,20,0.45)';
+      ctx.lineWidth = r*0.04;
+      for (let i = 0; i < 3; i++) {
+        const t = 0.25 + i * 0.22;
+        ctx.beginPath();
+        ctx.moveTo(-r*(0.5 + t*0.4), -r*(0.3 + t*0.8));
+        ctx.lineTo(-r*(0.5 + t*0.35), -r*(0.35 + t*0.6));
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(r*(0.5 + t*0.4), -r*(0.3 + t*0.8));
+        ctx.lineTo(r*(0.5 + t*0.35), -r*(0.35 + t*0.6));
+        ctx.stroke();
+      }
+    } else if (accId === 13) { // Fire — layered orange flame
+      const layers = [
+        { c: 'rgba(255,80,0,0.55)',  s: 1.0 },
+        { c: 'rgba(255,160,0,0.75)', s: 0.75 },
+        { c: 'rgba(255,220,40,0.85)',s: 0.5 },
+        { c: 'rgba(255,255,210,0.9)', s: 0.28 },
+      ];
+      for (const L of layers) {
+        ctx.fillStyle = L.c;
+        ctx.beginPath();
+        ctx.moveTo(-r*0.5*L.s, -r*0.3);
+        ctx.bezierCurveTo(-r*0.8*L.s, -r*0.8, -r*0.4*L.s, -r*1.2, 0, -r*1.6*L.s - r*0.4);
+        ctx.bezierCurveTo( r*0.4*L.s, -r*1.2,  r*0.8*L.s, -r*0.8, r*0.5*L.s, -r*0.3);
+        ctx.quadraticCurveTo(0, -r*0.45, -r*0.5*L.s, -r*0.3);
+        ctx.fill();
+      }
+    } else if (accId === 14) { // Ice Crown — glassy bluish spikes with shine
+      const ice = _linearGrad(ctx, 0, -r*1.2, 0, -r*0.4, '#e0f7ff', '#1e90ff');
+      ctx.fillStyle = ice;
+      ctx.beginPath();
+      ctx.moveTo(-r*0.55,-r*0.5);ctx.lineTo(-r*0.40,-r*1.10);ctx.lineTo(-r*0.15,-r*0.70);
+      ctx.lineTo(0,-r*1.25);ctx.lineTo(r*0.15,-r*0.70);ctx.lineTo(r*0.40,-r*1.10);
+      ctx.lineTo(r*0.55,-r*0.5);ctx.closePath();ctx.fill();
+      // Bright top edges
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = r*0.04;
+      ctx.beginPath();
+      ctx.moveTo(-r*0.55,-r*0.5); ctx.lineTo(-r*0.40,-r*1.10);
+      ctx.moveTo(-r*0.40,-r*1.10); ctx.lineTo(-r*0.15,-r*0.70);
+      ctx.moveTo(-r*0.15,-r*0.70); ctx.lineTo(0,-r*1.25);
+      ctx.moveTo(0,-r*1.25); ctx.lineTo(r*0.15,-r*0.70);
+      ctx.moveTo(r*0.15,-r*0.70); ctx.lineTo(r*0.40,-r*1.10);
+      ctx.moveTo(r*0.40,-r*1.10); ctx.lineTo(r*0.55,-r*0.5);
+      ctx.stroke();
+      // Glossy white shine on top spike
+      _shineDot(ctx, -r*0.05, -r*1.10, r*0.04);
+    } else if (accId === 15) { // Bandana — cloth fold with center knot
+      const bandc = _linearGrad(ctx, 0, -r*0.22, 0, r*0.10, '#ef4444', '#7f1d1d');
+      ctx.fillStyle = bandc;
+      ctx.fillRect(-r*0.85, -r*0.20, r*1.7, r*0.30);
+      // Polka dots
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      for (let i = -r*0.7; i <= r*0.7; i += r*0.30) {
+        ctx.beginPath(); ctx.arc(i, -r*0.05, r*0.05, 0, Math.PI*2); ctx.fill();
+      }
+      // Knot bump on right side
+      const knot = _radialGrad(ctx, r*0.93, -r*0.05, r*0.005, r*0.16, '#fca5a5', '#7f1d1d');
+      ctx.fillStyle = knot;
+      ctx.beginPath(); ctx.arc(r*0.95, -r*0.04, r*0.15, 0, Math.PI*2); ctx.fill();
+    } else if (accId === 16) { // Stars — three glowing golden stars
+      const starPos = [[-r*0.5,-r*1.20], [r*0.4,-r*1.42], [r*0.1,-r*1.02]];
+      for (const [sx, sy] of starPos) {
+        // Glow
+        const glow = _radialGrad(ctx, sx, sy, r*0.04, r*0.30, 'rgba(255,230,80,0.45)', 'rgba(255,230,80,0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath(); ctx.arc(sx, sy, r*0.28, 0, Math.PI*2); ctx.fill();
+        // Star path
+        const grad = _radialGrad(ctx, sx-r*0.04, sy-r*0.04, r*0.005, r*0.18, '#fff7c0', '#d97706');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        for (let i = 0; i < 5; i++) {
+          const a = i*Math.PI*2/5 - Math.PI/2;
+          const ir = r*0.06, or = r*0.16;
+          ctx.lineTo(sx + Math.cos(a)*or, sy + Math.sin(a)*or);
+          const a2 = a + Math.PI/5;
+          ctx.lineTo(sx + Math.cos(a2)*ir, sy + Math.sin(a2)*ir);
+        }
+        ctx.closePath(); ctx.fill();
+      }
+    } else if (accId === 17) { // Monocle — chrome ring with gleam + chain
+      // Ring
+      ctx.strokeStyle = _linearGrad(ctx, r*0.05, 0, r*0.55, 0, '#fff7d6', '#7a5400');
+      ctx.lineWidth = r*0.10;
+      ctx.beginPath(); ctx.arc(r*0.30, r*0.15, r*0.26, 0, Math.PI*2); ctx.stroke();
+      // Lens (subtle blue tint)
+      ctx.fillStyle = 'rgba(180,220,255,0.20)';
+      ctx.beginPath(); ctx.arc(r*0.30, r*0.15, r*0.22, 0, Math.PI*2); ctx.fill();
+      // Inner rim shadow
+      ctx.strokeStyle = 'rgba(80,55,0,0.6)';
+      ctx.lineWidth = r*0.03;
+      ctx.beginPath(); ctx.arc(r*0.30, r*0.15, r*0.22, 0, Math.PI*2); ctx.stroke();
+      // Chain
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = r*0.04;
+      ctx.setLineDash([r*0.05, r*0.05]);
+      ctx.beginPath(); ctx.moveTo(r*0.30, r*0.41); ctx.quadraticCurveTo(r*0.45, r*0.7, r*0.18, r*0.95); ctx.stroke();
+      ctx.setLineDash([]);
+      // Gleam on lens
+      _shineDot(ctx, r*0.16, r*0.04, r*0.05);
+    } else if (accId === 18) { // Pirate Hat — gradient brim with bone skull
+      // Brim gradient
+      const brim = _linearGrad(ctx, 0, -r*1.6, 0, -r*0.4, '#3a3a3a', '#0a0a0a');
+      ctx.fillStyle = brim;
+      ctx.beginPath();
+      ctx.moveTo(-r*0.85, -r*0.4);
+      ctx.quadraticCurveTo(0, -r*1.65, r*0.85, -r*0.4);
+      ctx.closePath();
+      ctx.fill();
+      // Gold trim
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = r*0.05;
+      ctx.beginPath();
+      ctx.moveTo(-r*0.85, -r*0.4);
+      ctx.quadraticCurveTo(0, -r*1.65, r*0.85, -r*0.4);
+      ctx.stroke();
+      // Highlight curve
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = r*0.05;
+      ctx.beginPath();
+      ctx.moveTo(-r*0.65, -r*0.7); ctx.quadraticCurveTo(0, -r*1.45, r*0.65, -r*0.7);
+      ctx.stroke();
+      // Skull
+      const skull = _radialGrad(ctx, -r*0.02, -r*0.85, r*0.01, r*0.20, '#fff', '#cbd5e1');
+      ctx.fillStyle = skull;
+      ctx.beginPath(); ctx.arc(0, -r*0.85, r*0.16, 0, Math.PI*2); ctx.fill();
+      // Eye sockets
+      ctx.fillStyle = '#0a0a0a';
+      ctx.beginPath(); ctx.arc(-r*0.06, -r*0.88, r*0.04, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( r*0.06, -r*0.88, r*0.04, 0, Math.PI*2); ctx.fill();
+      // Crossbones
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = r*0.05; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-r*0.18, -r*0.65); ctx.lineTo(r*0.18, -r*0.65);
+      ctx.moveTo(-r*0.16, -r*0.70); ctx.lineTo(r*0.16, -r*0.60);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+    } else if (accId === 19) { // Angel Wings — feathered with glow
+      // Glow halo behind
+      const glow = _radialGrad(ctx, 0, -r*0.2, r*0.4, r*1.2, 'rgba(255,255,255,0.25)', 'rgba(255,255,255,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(0, -r*0.2, r*1.1, 0, Math.PI*2); ctx.fill();
+      // Wing gradient
+      const wing = _linearGrad(ctx, 0, -r*0.8, 0, 0, '#ffffff', '#c8d4f0');
+      ctx.fillStyle = wing;
+      // Left wing
+      ctx.beginPath();
+      ctx.moveTo(-r*0.35, 0);
+      ctx.quadraticCurveTo(-r*1.55, -r*0.40, -r*0.85, -r*0.85);
+      ctx.quadraticCurveTo(-r*0.35, -r*0.45, -r*0.35, 0);
+      ctx.fill();
+      // Right wing
+      ctx.beginPath();
+      ctx.moveTo(r*0.35, 0);
+      ctx.quadraticCurveTo(r*1.55, -r*0.40, r*0.85, -r*0.85);
+      ctx.quadraticCurveTo(r*0.35, -r*0.45, r*0.35, 0);
+      ctx.fill();
+      // Feather strokes
+      ctx.strokeStyle = 'rgba(80,90,150,0.35)';
+      ctx.lineWidth = r*0.025;
+      for (let i = 0; i < 4; i++) {
+        const t = i / 4;
+        ctx.beginPath();
+        ctx.moveTo(-r*(0.4 + t*0.95), -r*(0.05 + t*0.55));
+        ctx.lineTo(-r*(0.35 + t*0.55), -r*(0.20 + t*0.45));
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(r*(0.4 + t*0.95), -r*(0.05 + t*0.55));
+        ctx.lineTo(r*(0.35 + t*0.55), -r*(0.20 + t*0.45));
+        ctx.stroke();
+      }
+    } else if (accId === 20) { // Headphones — chrome band + leather cushions
+      // Band (chrome)
+      ctx.strokeStyle = _linearGrad(ctx, 0, -r*0.75, 0, -r*0.1, '#fff', '#666');
+      ctx.lineWidth = r*0.14;
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(0, -r*0.05, r*0.72, Math.PI + 0.30, Math.PI*2 - 0.30); ctx.stroke();
+      ctx.lineCap = 'butt';
+      // Inner band shadow
+      ctx.strokeStyle = 'rgba(0,0,0,0.20)';
+      ctx.lineWidth = r*0.04;
+      ctx.beginPath(); ctx.arc(0, -r*0.05, r*0.72, Math.PI + 0.30, Math.PI*2 - 0.30); ctx.stroke();
+      // Cushions
+      const cush = _radialGrad(ctx, 0, 0, r*0.02, r*0.22, '#3a3a3a', '#0a0a0a');
+      ctx.fillStyle = cush;
+      ctx.beginPath(); ctx.arc(-r*0.66, r*0.18, r*0.22, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( r*0.66, r*0.18, r*0.22, 0, Math.PI*2); ctx.fill();
+      // Speaker inner (teal glow)
+      const sp = _radialGrad(ctx, 0, 0, r*0.01, r*0.13, '#a7f3d0', '#0f766e');
+      ctx.fillStyle = sp;
+      ctx.beginPath(); ctx.arc(-r*0.66, r*0.18, r*0.12, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( r*0.66, r*0.18, r*0.12, 0, Math.PI*2); ctx.fill();
+      // Shine on cushions
+      _shineDot(ctx, -r*0.72, r*0.10, r*0.04);
+      _shineDot(ctx,  r*0.60, r*0.10, r*0.04);
+    } else if (accId === 21) { // Chef Hat — pleated top with band
+      // Pleated dome (three soft cloud lobes)
+      const cloud = _radialGrad(ctx, 0, -r*1.1, r*0.05, r*0.6, '#ffffff', '#d8d8e0');
+      ctx.fillStyle = cloud;
+      ctx.beginPath(); ctx.arc(-r*0.30, -r*1.05, r*0.32, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc( r*0.30, -r*1.05, r*0.32, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(    0,  -r*1.30, r*0.36, 0, Math.PI*2); ctx.fill();
+      ctx.fillRect(-r*0.55, -r*1.05, r*1.1, r*0.55);
+      // Band
+      ctx.fillStyle = '#f4f4f8';
+      ctx.fillRect(-r*0.60, -r*0.50, r*1.2, r*0.14);
+      // Shadow under band
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillRect(-r*0.60, -r*0.36, r*1.2, r*0.03);
+      // Subtle outline
+      ctx.strokeStyle = 'rgba(0,0,0,0.10)';
+      ctx.lineWidth = r*0.03;
+      ctx.beginPath(); ctx.moveTo(-r*0.55, -r*0.50); ctx.lineTo(r*0.55, -r*0.50); ctx.stroke();
+    } else if (accId === 22) { // Goggles — glossy lenses with rubber strap
+      const lx = -r*0.33, rx = r*0.33, ey = r*0.10;
+      // Strap
+      ctx.strokeStyle = '#1f2937';
+      ctx.lineWidth = r*0.08;
+      ctx.beginPath(); ctx.arc(0, -r*0.05, r*0.72, Math.PI + 0.55, Math.PI*2 - 0.55); ctx.stroke();
+      // Lens — glossy aqua
+      const lens = _radialGrad(ctx, lx-r*0.08, ey-r*0.08, r*0.005, r*0.30, 'rgba(150,255,255,0.95)', 'rgba(0,80,120,0.85)');
+      ctx.fillStyle = lens;
+      ctx.beginPath(); ctx.arc(lx, ey, r*0.26, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = lens;
+      ctx.beginPath(); ctx.arc(rx, ey, r*0.26, 0, Math.PI*2); ctx.fill();
+      // Rims
+      ctx.strokeStyle = '#1f2937';
+      ctx.lineWidth = r*0.07;
+      ctx.beginPath(); ctx.arc(lx, ey, r*0.26, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(rx, ey, r*0.26, 0, Math.PI*2); ctx.stroke();
+      // Nose bridge
+      ctx.lineWidth = r*0.05;
+      ctx.beginPath(); ctx.moveTo(-r*0.10, ey); ctx.lineTo(r*0.10, ey); ctx.stroke();
+      // Shines
+      _shineDot(ctx, lx - r*0.10, ey - r*0.12, r*0.06);
+      _shineDot(ctx, rx - r*0.10, ey - r*0.12, r*0.06);
+    } else if (accId === 23) { // Mushroom — red cap with white dots, gills under
+      // Cap (dome)
+      const cap = _linearGrad(ctx, 0, -r*1.30, 0, -r*0.5, '#ff7676', '#9b1c1c');
+      ctx.fillStyle = cap;
+      ctx.beginPath();
+      ctx.arc(0, -r*0.85, r*0.55, Math.PI, 0);
+      ctx.lineTo(r*0.25, -r*0.45);
+      ctx.lineTo(-r*0.25, -r*0.45);
+      ctx.closePath();
+      ctx.fill();
+      // Cap highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.beginPath(); ctx.ellipse(-r*0.20, -r*1.05, r*0.18, r*0.10, 0.3, 0, Math.PI*2); ctx.fill();
+      // White dots
+      ctx.fillStyle = 'rgba(255,255,255,0.95)';
+      const dots = [[-r*0.20,-r*1.00,r*0.08],[r*0.18,-r*0.85,r*0.07],[-r*0.04,-r*0.78,r*0.05]];
+      for (const [dx, dy, dr] of dots) {
+        ctx.beginPath(); ctx.arc(dx, dy, dr, 0, Math.PI*2); ctx.fill();
+      }
+      // Stem with gills under
+      const stem = _linearGrad(ctx, 0, -r*0.5, 0, -r*0.15, '#fef3c7', '#d6a45f');
+      ctx.fillStyle = stem;
+      ctx.fillRect(-r*0.18, -r*0.50, r*0.36, r*0.30);
+      // Gills (thin lines under)
+      ctx.strokeStyle = 'rgba(120,80,40,0.45)';
+      ctx.lineWidth = r*0.02;
+      for (let i = -r*0.18; i <= r*0.18; i += r*0.06) {
+        ctx.beginPath(); ctx.moveTo(i, -r*0.45); ctx.lineTo(i, -r*0.36); ctx.stroke();
+      }
     }
     ctx.restore();
   }
@@ -1692,21 +2103,24 @@
   }
 
   function drawRoyaleRing(cx, cy) {
-    // Source the radius from either local royale mode OR the server royale state
+    // Source the radius + center from either local royale mode OR the server royale state
     let r = null;
     let pulse = 1;
+    let zoneCX = 0, zoneCY = 0;
     if (localGame && localGame.mode === 'royale') {
       r = localGame.safeRadius;
-      pulse = 1 + Math.sin(localGame.shrinkPulse) * 0.06;
+      zoneCX = localGame.safeCenterX || 0;
+      zoneCY = localGame.safeCenterY || 0;
+      // No bobbing — keep it dead steady
     } else if (mpRoyale && (mpRoyale.state === 'active' || mpRoyale.state === 'ended')) {
       r = mpRoyale.zoneR;
-      pulse = 1 + Math.sin(animTime * 2) * 0.04;
+      pulse = 1;
     } else {
       return;
     }
-    // World origin projected to canvas (we're already inside the zoom transform).
-    const ox = canvas.width / 2 - cx;
-    const oy = canvas.height / 2 - cy;
+    // World→canvas: shift by the zone center as well as the camera offset
+    const ox = canvas.width / 2 - cx + zoneCX;
+    const oy = canvas.height / 2 - cy + zoneCY;
     // Danger fill — everything outside the safe zone is deadly.
     // Use even-odd fill so we paint a ring from the canvas edge to the safe radius.
     const halfW = canvas.width / (2 * zoom);
@@ -1823,6 +2237,19 @@
       let r=dotR*(1-tailT*0.35);
       // Evolution: score>=2000 body dots pulse gently (+-5%)
       if (score >= 2000) r *= 1 + 0.05 * Math.sin(animTime * 4 + i * 0.3);
+      // Mid-point dot — packs the body so it reads as a continuous tube
+      // instead of a string of pearls. Drawn first so the main segment paints
+      // over its center for crisper edges.
+      const next = segs[i-1];
+      if (next) {
+        const mx = (seg.x + next.x) * 0.5 - cx + midX;
+        const my = (seg.y + next.y) * 0.5 - cy + midY;
+        const midColor = getSegColor(snake, i - 1);
+        ctx.fillStyle = midColor;
+        ctx.globalAlpha = 0.95;
+        const mr = r * 1.02;
+        ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fill();
+      }
       ctx.fillStyle=getSegColor(snake,i);ctx.globalAlpha=0.95;ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.fill();
       // Evolution: score>=500 white rim on body dots
       if (score >= 500) {
