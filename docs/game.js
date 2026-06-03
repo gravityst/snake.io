@@ -559,8 +559,10 @@
   }
 
   function applyModeSelection() {
-    document.getElementById('classicModeBtn').classList.toggle('active', selectedLocalMode === 'classic');
-    document.getElementById('royaleModeBtn').classList.toggle('active', selectedLocalMode === 'royale');
+    const cm = document.getElementById('classicModeBtn');
+    const rm = document.getElementById('royaleModeBtn');
+    if (cm) cm.classList.toggle('active', selectedLocalMode === 'classic');
+    if (rm) rm.classList.toggle('active', selectedLocalMode === 'royale');
     localStorage.setItem('selectedLocalMode', selectedLocalMode);
   }
   // --- Game state (must be declared before frame loop touches them) ---
@@ -831,6 +833,20 @@
       const res = await fetch(SERVER_URL + '/api/rooms');
       const rooms = await res.json();
       roomList.innerHTML = '';
+      // Coming-soon teaser for multiplayer Battle Royale
+      const teaser = document.createElement('div');
+      teaser.className = 'room-card';
+      teaser.style.opacity = '0.55';
+      teaser.style.cursor = 'not-allowed';
+      teaser.innerHTML = `
+        <div class="room-left">
+          <span class="mode-badge royale">BATTLE ROYALE</span>
+          <span class="mode-badge" style="background:rgba(251,191,36,0.16);color:#fbbf24;border:1px solid rgba(251,191,36,0.4);">SOON</span>
+          <span class="room-name">Multiplayer Battle Royale</span>
+        </div>
+        <span class="room-players" style="color:#94a3b8;">coming soon</span>
+      `;
+      roomList.appendChild(teaser);
       for (const room of rooms) {
         const card = document.createElement('div');
         card.className = 'room-card' + (room.players >= room.maxPlayers ? ' full' : '');

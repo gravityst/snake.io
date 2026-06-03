@@ -1005,25 +1005,12 @@ class RoomManager {
     this.wsToRoom = new Map();
     this.nextCustomId = 100;
 
-    // Pre-created rooms
+    // Pre-created rooms — multiplayer is classic + team for now.
+    // Battle Royale is AI-only on the client side (see Play vs AI mode toggle).
+    // We'll re-enable multiplayer BR once the lobby/spectator UX is polished.
     this.createRoom('room-0', 'Free For All', { mode: 'solo' });
     this.createRoom('room-1', 'Neon Arena', { mode: 'solo' });
     this.createRoom('room-2', 'Team Battle', { mode: 'team', teamSize: 2, maxTeams: 8 });
-    this.createRoom('room-3', 'Battle Royale', { mode: 'royale' });
-
-    // Periodically clean up ended/empty BR rooms and re-spawn a replacement
-    // if the standing public BR room sealed itself.
-    setInterval(() => {
-      // Always keep at least one open BR room available
-      let openBR = false;
-      for (const [, r] of this.rooms) {
-        if (r.mode === 'royale' && r._isRoyaleOpen() && !r.isCustom) { openBR = true; break; }
-      }
-      if (!openBR) {
-        const nextId = `royale-${Date.now().toString(36)}`;
-        this.createRoom(nextId, 'Battle Royale', { mode: 'royale' });
-      }
-    }, 5000);
 
     // noServer mode: upgrade routing is handled in index.js so multiple
     // games (snake, click-battle) can share one Render service.
@@ -1042,10 +1029,10 @@ class RoomManager {
   }
 
   createCustomRoom(name, mode, teamSize, creatorName) {
+    // BR is AI-only for now; force any "royale" custom-room request to solo.
+    if (mode === 'royale') mode = 'solo';
     const id = `custom-${this.nextCustomId++}`;
-    const opts = mode === 'royale'
-      ? { mode: 'royale', isCustom: true, creatorName }
-      : { mode, teamSize: teamSize || 2, maxTeams: Math.floor(30/(teamSize||2)), isCustom: true, creatorName };
+    const opts = { mode, teamSize: teamSize || 2, maxTeams: Math.floor(30/(teamSize||2)), isCustom: true, creatorName };
     const room = this.createRoom(id, name, opts);
     // Generate random 6-char alphanumeric room code
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';

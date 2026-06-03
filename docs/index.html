@@ -327,6 +327,41 @@
     }
     .action-stack .input { font-size: 16px; }
 
+    /* Mode toggle (Classic vs Battle Royale, AI only) */
+    .mode-toggle {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      padding: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-top: 4px;
+    }
+    .mode-tab {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      padding: 10px 8px;
+      font-family: inherit;
+      background: transparent;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: color var(--t-base), background var(--t-base);
+    }
+    .mode-tab:hover { color: var(--text-soft); background: var(--surface-2); }
+    .mode-tab.active {
+      color: #062d2a;
+      background: linear-gradient(135deg, var(--teal), #38bdf8);
+      box-shadow: 0 4px 14px var(--teal-glow);
+    }
+    .mode-tab.active .mode-tab-sub { color: rgba(6, 45, 42, 0.7); }
+    .mode-tab-title { font-size: 13px; font-weight: 800; letter-spacing: 0.4px; }
+    .mode-tab-sub { font-size: 10px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-dim); }
+
     .online-indicator {
       display: flex;
       align-items: center;
@@ -1151,6 +1186,18 @@
           PLAY VS AI
         </button>
 
+        <!-- AI mode selector (Classic vs Battle Royale) -->
+        <div class="mode-toggle">
+          <button class="mode-tab active" id="classicModeBtn" type="button">
+            <span class="mode-tab-title">Classic</span>
+            <span class="mode-tab-sub">Eat &middot; Grow &middot; Survive</span>
+          </button>
+          <button class="mode-tab" id="royaleModeBtn" type="button">
+            <span class="mode-tab-title">Battle Royale</span>
+            <span class="mode-tab-sub">Shrinking zone &middot; Last alive</span>
+          </button>
+        </div>
+
         <div class="online-indicator">
           <span class="online-dot"></span>
           <span id="onlineCount">-- online</span>
@@ -1234,7 +1281,7 @@
           <select id="roomModeSelect" class="select">
             <option value="solo">Solo &mdash; Free for All</option>
             <option value="team">Team Battle</option>
-            <option value="royale">Battle Royale &mdash; Last Snake Standing</option>
+            <option value="royale" disabled>Battle Royale &mdash; Coming soon</option>
           </select>
         </div>
         <div class="field" id="teamSizeField" style="display:none;">
@@ -1470,7 +1517,7 @@
       update();
     })();
   </script>
-  <script src="local-game.js?v=23"></script>
-  <script src="game.js?v=23"></script>
+  <script src="local-game.js?v=24"></script>
+  <script src="game.js?v=24"></script>
 </body>
 </html>
