@@ -27,6 +27,31 @@ const SKILL_BEGINNER = 0;
 const SKILL_AMATEUR = 1;
 const SKILL_ADVANCED = 2;
 const SKINS_COUNT = 43;
+
+// =====================================================
+// BATTLE ROYALE configuration
+// =====================================================
+// Match lifecycle:
+//   'lobby'     — open for joins, AI fills empty slots, no zone, no timer
+//   'countdown' — first player joined; 30s join window before match starts
+//   'active'    — joins LOCKED, room hidden from list, zone shrinks, no respawn
+//   'ended'     — winner declared, room resets to lobby after a short delay
+const ROYALE_JOIN_WINDOW_MS = 30000;
+const ROYALE_MAX_PLAYERS = 24;
+
+// Each phase: hold the zone where it is for `hold` seconds, then shrink to
+// `radius` over `shrinkTime` seconds. While outside, lose `damage` score/sec.
+// Easy to tune.
+const ROYALE_PHASES = [
+  { hold: 25, shrinkTime: 30, radius: 5000, damage: 4  },
+  { hold: 18, shrinkTime: 28, radius: 3000, damage: 7  },
+  { hold: 14, shrinkTime: 22, radius: 1500, damage: 11 },
+  { hold: 10, shrinkTime: 16, radius:  650, damage: 16 },
+  { hold:  8, shrinkTime: 12, radius:  200, damage: 24 },
+];
+const ROYALE_INITIAL_RADIUS = 7000;
+const ROYALE_END_HOLD_MS = 12000; // hold ended state before resetting
+
 const BOT_NAMES = [
   'Viper','Shadow','Blaze','Neon','Ghost','Toxic','Pixel','Glitch',
   'Storm','Bolt','Ember','Frost','Nova','Pulse','Drift','Surge',
@@ -43,11 +68,31 @@ class Room {
   constructor(id, name, opts = {}) {
     this.id = id;
     this.name = name;
-    this.mode = opts.mode || 'solo';       // 'solo' | 'team'
+    this.mode = opts.mode || 'solo';       // 'solo' | 'team' | 'royale'
     this.teamSize = opts.teamSize || 2;    // players per team (team mode)
     this.maxTeams = opts.maxTeams || Math.floor(MAX_PLAYERS_PER_ROOM / (this.teamSize || 2));
     this.isCustom = opts.isCustom || false;
     this.creatorName = opts.creatorName || '';
+
+    // ---- Battle Royale state ----
+    if (this.mode === 'royale') {
+      this.royaleState = 'lobby';
+      this.royaleJoinDeadline = 0;             // wall-clock ms when match starts
+      this.royaleMatchStart = 0;               // wall-clock ms when active began
+      this.royaleEndTime = 0;                  // wall-clock ms of round end
+      this.royalePhaseIndex = -1;              // -1 = not started
+      this.royalePhaseStart = 0;               // wall-clock ms when current phase began
+      this.zone = {
+        cx: 0, cy: 0,
+        radius: ROYALE_INITIAL_RADIUS,
+        prevRadius: ROYALE_INITIAL_RADIUS,
+        targetRadius: ROYALE_INITIAL_RADIUS,
+        damage: 0,
+      };
+      this.royaleWinnerId = null;
+      this.royaleWinnerName = '';
+    }
+
 
     // Team state (team mode only)
     // teams: Map<teamId, { name, color, memberIds: Set<snakeId> }>
@@ -91,6 +136,8 @@ class Room {
     this.broadcastInterval = setInterval(() => {
       this.broadcastState();
       this.broadcastLeaderboard();
+      // Royale state at lower freq (every ~6 frames ≈ 5 Hz)
+      if (this.mode === 'royale' && this.tickCount % 6 === 0) this.broadcastRoyaleState();
     }, BROADCAST_MS);
   }
 
@@ -110,7 +157,27 @@ class Room {
   }
 
   get realPlayerCount() { return this.clients.size; }
-  get targetBotCount() { return Math.max(0, MAX_BOTS - this.realPlayerCount); }
+  get targetBotCount() {
+    // In Battle Royale, freeze bot count when match starts. Lobby fills to ROYALE_MAX_PLAYERS.
+    if (this.mode === 'royale') {
+      if (this.royaleState === 'active' || this.royaleState === 'ended') return 0;
+      return Math.max(0, ROYALE_MAX_PLAYERS - this.realPlayerCount);
+    }
+    return Math.max(0, MAX_BOTS - this.realPlayerCount);
+  }
+
+  // Royale: are joins still being accepted?
+  _isRoyaleOpen() {
+    if (this.mode !== 'royale') return true;
+    return this.royaleState === 'lobby' || this.royaleState === 'countdown';
+  }
+
+  // Royale: should bots be respawned on death?
+  _allowBotRespawn() {
+    if (this.mode !== 'royale') return true;
+    return this.royaleState === 'lobby' || this.royaleState === 'countdown';
+  }
+
 
   // --- Helpers ---
   _zoned(power = 1.5) {
@@ -201,6 +268,21 @@ class Room {
   playerJoin(ws, name, skinIdx, teamId, accessory) {
     if (this.clients.has(ws)) return;
     if (this.realPlayerCount >= MAX_PLAYERS_PER_ROOM) return;
+    // Battle Royale: refuse joins once the match has sealed
+    if (this.mode === 'royale' && !this._isRoyaleOpen()) {
+      // Send a "match already in progress" close so the client can fall back
+      try {
+        const d = Buffer.alloc(2);
+        d[0] = 0x09; // royale-sealed notification
+        d[1] = 1;
+        ws.send(d);
+        setTimeout(() => { try { ws.close(4002, 'match-sealed'); } catch {} }, 50);
+      } catch {}
+      return;
+    }
+    // Remember rejoin info on the ws so we can recreate the snake on round reset
+    ws._joinInfo = { name, skinIdx, teamId, accessory };
+
 
     let snake;
     // Check for a disconnected snake with the same name to reconnect
@@ -229,6 +311,12 @@ class Room {
 
     this.clients.set(ws, snake.id);
     this._startLoop(); // wake up room when player joins
+
+    // Battle Royale: arm the join window the moment the first human joins
+    if (this.mode === 'royale' && this.royaleState === 'lobby') {
+      this.royaleState = 'countdown';
+      this.royaleJoinDeadline = Date.now() + ROYALE_JOIN_WINDOW_MS;
+    }
 
     // Welcome: [0x02][version u8][yourId u16]
     const welcome = Buffer.alloc(4);
@@ -373,11 +461,21 @@ class Room {
     }
     // Remove from team
     if(snake.teamId>=0){ const t=this.teams.get(snake.teamId); if(t) t.memberIds.delete(id); }
-    if(snake.isBot&&!noRespawn) setTimeout(()=>this.respawnBot(id),2000);
+    if(snake.isBot&&!noRespawn&&this._allowBotRespawn()) setTimeout(()=>this.respawnBot(id),2000);
+    else if(snake.isBot) {
+      // Remove from bots roster — no respawn during BR active phase
+      const idx = this.bots.indexOf(id);
+      if (idx >= 0) this.bots.splice(idx, 1);
+    }
     this.snakes.delete(id);
   }
 
   respawnBot(oldId) {
+    if (!this._allowBotRespawn()) {
+      const idx=this.bots.indexOf(oldId);
+      if (idx>=0) this.bots.splice(idx,1);
+      return;
+    }
     const idx=this.bots.indexOf(oldId);
     if(idx<0) return;
     if(this.bots.length>this.targetBotCount){this.bots.splice(idx,1);return;}
@@ -391,12 +489,189 @@ class Room {
     this.bots[idx]=snake.id;
   }
 
+  // --- BATTLE ROYALE lifecycle ---
+  _royaleTick(now, dt) {
+    if (this.mode !== 'royale') return;
+
+    if (this.royaleState === 'countdown') {
+      if (now >= this.royaleJoinDeadline) {
+        // Seal the room: lock joins, start match
+        this.royaleState = 'active';
+        this.royaleMatchStart = now;
+        this.royalePhaseIndex = -1;        // will advance to 0 on first phase tick
+        this.royalePhaseStart = now;
+        this.zone.cx = 0; this.zone.cy = 0;
+        this.zone.radius = ROYALE_INITIAL_RADIUS;
+        this.zone.prevRadius = ROYALE_INITIAL_RADIUS;
+        this.zone.targetRadius = ROYALE_INITIAL_RADIUS;
+        this.zone.damage = 0;
+        // Broadcast "match start"
+        const buf = Buffer.alloc(2); buf[0]=0x0A; buf[1]=1;
+        this.broadcast(buf);
+        console.log(`[${this.name}] BATTLE ROYALE match started with ${this.realPlayerCount} humans, ${this.bots.length} bots`);
+      }
+    }
+
+    if (this.royaleState === 'active') {
+      // Advance phases on a timer
+      if (this.royalePhaseIndex < 0) {
+        this.royalePhaseIndex = 0;
+        this.royalePhaseStart = now;
+        const p = ROYALE_PHASES[0];
+        this.zone.targetRadius = p.radius;
+        this.zone.damage = p.damage;
+      }
+      const phase = ROYALE_PHASES[this.royalePhaseIndex];
+      if (phase) {
+        const elapsed = (now - this.royalePhaseStart) / 1000;
+        const totalPhaseTime = phase.hold + phase.shrinkTime;
+        if (elapsed >= phase.hold && elapsed <= totalPhaseTime) {
+          // Shrinking
+          const shrinkT = (elapsed - phase.hold) / phase.shrinkTime;
+          this.zone.radius = this.zone.prevRadius + (phase.radius - this.zone.prevRadius) * shrinkT;
+        } else if (elapsed > totalPhaseTime) {
+          // Phase done; advance
+          this.zone.radius = phase.radius;
+          this.zone.prevRadius = phase.radius;
+          this.royalePhaseIndex++;
+          this.royalePhaseStart = now;
+          const next = ROYALE_PHASES[this.royalePhaseIndex];
+          if (next) {
+            this.zone.targetRadius = next.radius;
+            this.zone.damage = next.damage;
+          }
+        }
+      }
+
+      // Apply zone damage (drains score while outside)
+      for (const [, s] of this.snakes) {
+        if (!s.alive) continue;
+        const h = s.segments[0];
+        const dx = h.x - this.zone.cx, dy = h.y - this.zone.cy;
+        if (dx*dx + dy*dy > this.zone.radius * this.zone.radius) {
+          s.zoneDamageAccum = (s.zoneDamageAccum || 0) + this.zone.damage * dt;
+          if (s.zoneDamageAccum >= 1) {
+            const rm = Math.floor(s.zoneDamageAccum);
+            s.zoneDamageAccum -= rm;
+            s.score = Math.max(0, s.score - rm);
+            if (s.score <= 0) {
+              // Score reached zero in zone — die
+              this.killSnake(s.id, null, true);
+            }
+          }
+        } else {
+          s.zoneDamageAccum = 0;
+        }
+      }
+
+      // Win condition: 1 or 0 humans + bots alive — keep going if many bots; but
+      // call it when only one snake remains alive
+      const aliveSnakes = Array.from(this.snakes.values()).filter(s => s.alive);
+      if (aliveSnakes.length <= 1) {
+        this.royaleState = 'ended';
+        this.royaleEndTime = now;
+        if (aliveSnakes.length === 1) {
+          this.royaleWinnerId = aliveSnakes[0].id;
+          this.royaleWinnerName = aliveSnakes[0].name;
+        } else {
+          this.royaleWinnerId = null;
+          this.royaleWinnerName = '';
+        }
+        // Broadcast winner: [0x0B][winnerId u16][nameLen u8][name]
+        const nameBytes = Buffer.from(this.royaleWinnerName || 'No one', 'utf8');
+        const buf = Buffer.alloc(4 + nameBytes.length);
+        buf[0] = 0x0B;
+        buf.writeUInt16LE(this.royaleWinnerId || 0, 1);
+        buf[3] = nameBytes.length;
+        nameBytes.copy(buf, 4);
+        this.broadcast(buf);
+      }
+    }
+
+    if (this.royaleState === 'ended') {
+      if (now - this.royaleEndTime > ROYALE_END_HOLD_MS) {
+        this._royaleResetRound();
+      }
+    }
+  }
+
+  _royaleResetRound() {
+    // Reset everything for a fresh round
+    for (const [, s] of this.snakes) s.alive = false;
+    this.snakes.clear();
+    this.bots = [];
+    this.food = [];
+    this.megaOrbs = [];
+    this.spawnFood();
+    this.spawnMegaOrbs();
+    this.spawnBots(ROYALE_MAX_PLAYERS); // fill with bots initially
+    // Re-seat connected clients with fresh snakes
+    const stillConnected = Array.from(this.clients.keys());
+    this.clients.clear();
+    this.disconnected.clear();
+    for (const ws of stillConnected) {
+      if (ws.readyState !== 1) continue;
+      const info = ws._joinInfo;
+      if (!info) continue;
+      // Re-trigger join flow
+      this.playerJoin(ws, info.name, info.skinIdx, info.teamId, info.accessory);
+    }
+    this.royaleState = this.realPlayerCount > 0 ? 'countdown' : 'lobby';
+    this.royaleJoinDeadline = this.royaleState === 'countdown'
+      ? Date.now() + ROYALE_JOIN_WINDOW_MS : 0;
+    this.royalePhaseIndex = -1;
+    this.royaleWinnerId = null;
+    this.royaleWinnerName = '';
+    this.zone.cx = 0; this.zone.cy = 0;
+    this.zone.radius = ROYALE_INITIAL_RADIUS;
+    this.zone.prevRadius = ROYALE_INITIAL_RADIUS;
+    this.zone.targetRadius = ROYALE_INITIAL_RADIUS;
+    this.zone.damage = 0;
+    console.log(`[${this.name}] BR round reset → ${this.royaleState}`);
+  }
+
+  // Broadcast royale state to all clients (periodic, ~5 Hz)
+  broadcastRoyaleState() {
+    if (this.mode !== 'royale') return;
+    const now = Date.now();
+    let countdownMs = 0;
+    if (this.royaleState === 'countdown') {
+      countdownMs = Math.max(0, this.royaleJoinDeadline - now);
+    }
+    let endMs = 0;
+    if (this.royaleState === 'ended') {
+      endMs = Math.max(0, this.royaleEndTime + ROYALE_END_HOLD_MS - now);
+    }
+    // [0x08][state u8][countdownMs u16][endMs u16][zoneRadius u16][zoneTarget u16]
+    //       [damage u8][aliveCount u8][winnerId u16][nameLen u8][name]
+    const stateMap = { lobby: 0, countdown: 1, active: 2, ended: 3 };
+    const stateByte = stateMap[this.royaleState] ?? 0;
+    const winName = this.royaleWinnerName || '';
+    const nb = Buffer.from(winName, 'utf8');
+    const buf = Buffer.alloc(16 + nb.length);
+    let off = 0;
+    buf[off++] = 0x08;
+    buf[off++] = stateByte;
+    buf.writeUInt16LE(Math.min(65535, Math.max(0, Math.floor(countdownMs))), off); off += 2;
+    buf.writeUInt16LE(Math.min(65535, Math.max(0, Math.floor(endMs))), off); off += 2;
+    buf.writeUInt16LE(Math.min(65535, Math.round(this.zone.radius)), off); off += 2;
+    buf.writeUInt16LE(Math.min(65535, Math.round(this.zone.targetRadius)), off); off += 2;
+    buf[off++] = Math.min(255, this.zone.damage);
+    const aliveCount = Array.from(this.snakes.values()).filter(s => s.alive).length;
+    buf[off++] = Math.min(255, aliveCount);
+    buf.writeUInt16LE(this.royaleWinnerId || 0, off); off += 2;
+    buf[off++] = nb.length;
+    nb.copy(buf, off); off += nb.length;
+    this.broadcast(buf.slice(0, off));
+  }
+
   // --- Main tick ---
   tick() {
     const now=Date.now();
     const dt=Math.min((now-this.lastTick)/1000,0.05);
     this.lastTick=now;
     this.tickCount++;
+    this._royaleTick(now, dt);
     // Clean up disconnected snakes after 10 seconds
     for (const [name, snakeId] of this.disconnected) {
       const s = this.snakes.get(snakeId);
@@ -501,11 +776,34 @@ class Room {
     // players who were just passing near a long snake.
   }
 
-  // --- Bot AI (unchanged) ---
-  _botAI(s,dt){if(s.skill===SKILL_ADVANCED)this._advAI(s,dt);else if(s.skill===SKILL_AMATEUR)this._amtAI(s,dt);else this._begAI(s,dt);}
+  // --- Bot AI ---
+  // Returns true if the bot is fleeing the safe-zone edge (BR only)
+  _fleeZoneIfNeeded(s) {
+    if (this.mode !== 'royale' || this.royaleState !== 'active') return false;
+    const h = s.segments[0];
+    const dx = h.x - this.zone.cx, dy = h.y - this.zone.cy;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    // Start fleeing when within 250px of zone edge or already outside
+    if (d > this.zone.radius - 250) {
+      s.targetAngle = Math.atan2(this.zone.cy - h.y, this.zone.cx - h.x);
+      s.boosting = d > this.zone.radius - 50 && s.score > 8;
+      return true;
+    }
+    return false;
+  }
+  _botAI(s,dt){
+    // Royale: tougher AI - upgrade beginners to amateur level on the fly
+    const effSkill = (this.mode === 'royale' && this.royaleState === 'active')
+      ? Math.min(SKILL_ADVANCED, s.skill + 1)
+      : s.skill;
+    if (effSkill===SKILL_ADVANCED) this._advAI(s,dt);
+    else if (effSkill===SKILL_AMATEUR) this._amtAI(s,dt);
+    else this._begAI(s,dt);
+  }
 
   _begAI(s,dt){
     s.botTimer-=dt;if(s.botTimer>0)return;s.botTimer=0.5+Math.random()*0.6;
+    if(this._fleeZoneIfNeeded(s)) return;
     const h=s.segments[0],wall=MAP_SIZE/2-250;
     if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=false;return;}
     // Basic threat avoidance — don't blindly crash into other snakes
@@ -526,25 +824,43 @@ class Room {
         }
       }
     }
-    if(Math.random()<0.15){s.botWanderAngle+=(Math.random()-0.5)*2;s.targetAngle=s.botWanderAngle;s.boosting=false;return;}
-    let cl=null,cSq=300*300;
-    for(const f of this.food){const dx=f.x-h.x;if(dx>300||dx<-300)continue;const dy=f.y-h.y;if(dy>300||dy<-300)continue;const d2=dx*dx+dy*dy;if(d2<cSq){cSq=d2;cl=f;}}
+    if(Math.random()<0.08){s.botWanderAngle+=(Math.random()-0.5)*2;s.targetAngle=s.botWanderAngle;s.boosting=false;return;}
+    // Eager food chase — bigger range, weighted by value (prefer high-tier dead-snake drops)
+    let cl=null,cBest=0;
+    for(const f of this.food){
+      const dx=f.x-h.x; if(dx>500||dx<-500)continue;
+      const dy=f.y-h.y; if(dy>500||dy<-500)continue;
+      const d2=dx*dx+dy*dy;
+      // value / (dist+40), boosted for tier>=2 (dead-snake remains)
+      const tierBoost = (f.tier||0) >= 2 ? 1.6 : 1.0;
+      const score = ((f.value||1) * tierBoost) / (Math.sqrt(d2)+40);
+      if (score>cBest){cBest=score;cl=f;}
+    }
     if(cl)s.targetAngle=Math.atan2(cl.y-h.y,cl.x-h.x);else{s.botWanderAngle+=(Math.random()-0.5)*1.5;s.targetAngle=s.botWanderAngle;}
     s.boosting=false;
   }
   _amtAI(s,dt){
     s.botTimer-=dt;if(s.botTimer>0)return;s.botTimer=0.3+Math.random()*0.4;
+    if(this._fleeZoneIfNeeded(s)) return;
     const h=s.segments[0],wall=MAP_SIZE/2-250;
     if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=true;return;}
-    let cl=null,cSq=450*450;
-    for(const f of this.food){const dx=f.x-h.x;if(dx>450||dx<-450)continue;const dy=f.y-h.y;if(dy>450||dy<-450)continue;const d2=dx*dx+dy*dy;if(d2<cSq){cSq=d2;cl=f;}}
+    // Bigger food chase range + value/tier weighting
+    let cl=null,cBest=0;
+    for(const f of this.food){
+      const dx=f.x-h.x; if(dx>700||dx<-700)continue;
+      const dy=f.y-h.y; if(dy>700||dy<-700)continue;
+      const tierBoost = (f.tier||0) >= 2 ? 1.8 : 1.0;
+      const score = ((f.value||1) * tierBoost) / (Math.sqrt(dx*dx+dy*dy)+40);
+      if(score>cBest){cBest=score;cl=f;}
+    }
     for(const[,o]of this.snakes){if(o.id===s.id||!o.alive)continue;const dx=o.segments[0].x-h.x,dy=o.segments[0].y-h.y,d=Math.sqrt(dx*dx+dy*dy);
       if(d<180){s.targetAngle=Math.atan2(-dy,-dx)+(Math.random()-0.5)*0.5;s.boosting=d<90;return;}}
-    if(cl){s.targetAngle=Math.atan2(cl.y-h.y,cl.x-h.x);s.boosting=false;}
+    if(cl){s.targetAngle=Math.atan2(cl.y-h.y,cl.x-h.x);s.boosting=cBest>0.3 && s.score>15;}
     else{s.botWanderAngle+=(Math.random()-0.5)*1.2;s.targetAngle=s.botWanderAngle;s.boosting=false;}
   }
   _advAI(s,dt){
     s.botTimer-=dt;if(s.botTimer>0)return;s.botTimer=0.08;
+    if(this._fleeZoneIfNeeded(s)) return;
     const h=s.segments[0],wall=MAP_SIZE/2-250;
     if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=false;return;}
     // Check body segments ahead — avoid collisions with ANY snake body
@@ -576,9 +892,17 @@ class Room {
       s.boosting=bpd>200&&bpd<600&&s.score>30;
       return;
     }
-    // High-value food with better range
-    let bf=null,br=0;for(const f of this.food){const dx=f.x-h.x;if(dx>1000||dx<-1000)continue;const dy=f.y-h.y;if(dy>1000||dy<-1000)continue;const ratio=(f.value||1)/(Math.sqrt(dx*dx+dy*dy)+40);if(ratio>br){br=ratio;bf=f;}}
-    if(bf){s.targetAngle=Math.atan2(bf.y-h.y,bf.x-h.x);s.boosting=false;return;}
+    // High-value food with better range — heavily prefer dead-snake remains (tier >= 2)
+    let bf=null,br=0;
+    for(const f of this.food){
+      const dx=f.x-h.x;if(dx>1400||dx<-1400)continue;
+      const dy=f.y-h.y;if(dy>1400||dy<-1400)continue;
+      const tier = f.tier || 0;
+      const tierBoost = tier >= 4 ? 2.4 : tier >= 2 ? 1.8 : 1.0;
+      const ratio = ((f.value||1) * tierBoost) / (Math.sqrt(dx*dx+dy*dy)+40);
+      if(ratio>br){br=ratio;bf=f;}
+    }
+    if(bf){s.targetAngle=Math.atan2(bf.y-h.y,bf.x-h.x);s.boosting=br>0.4 && s.score>40;return;}
     s.botWanderAngle+=(Math.random()-0.5)*0.4;s.targetAngle=s.botWanderAngle;s.boosting=false;
   }
 
@@ -685,6 +1009,21 @@ class RoomManager {
     this.createRoom('room-0', 'Free For All', { mode: 'solo' });
     this.createRoom('room-1', 'Neon Arena', { mode: 'solo' });
     this.createRoom('room-2', 'Team Battle', { mode: 'team', teamSize: 2, maxTeams: 8 });
+    this.createRoom('room-3', 'Battle Royale', { mode: 'royale' });
+
+    // Periodically clean up ended/empty BR rooms and re-spawn a replacement
+    // if the standing public BR room sealed itself.
+    setInterval(() => {
+      // Always keep at least one open BR room available
+      let openBR = false;
+      for (const [, r] of this.rooms) {
+        if (r.mode === 'royale' && r._isRoyaleOpen() && !r.isCustom) { openBR = true; break; }
+      }
+      if (!openBR) {
+        const nextId = `royale-${Date.now().toString(36)}`;
+        this.createRoom(nextId, 'Battle Royale', { mode: 'royale' });
+      }
+    }, 5000);
 
     // noServer mode: upgrade routing is handled in index.js so multiple
     // games (snake, click-battle) can share one Render service.
@@ -704,7 +1043,9 @@ class RoomManager {
 
   createCustomRoom(name, mode, teamSize, creatorName) {
     const id = `custom-${this.nextCustomId++}`;
-    const opts = { mode, teamSize: teamSize || 2, maxTeams: Math.floor(30/(teamSize||2)), isCustom: true, creatorName };
+    const opts = mode === 'royale'
+      ? { mode: 'royale', isCustom: true, creatorName }
+      : { mode, teamSize: teamSize || 2, maxTeams: Math.floor(30/(teamSize||2)), isCustom: true, creatorName };
     const room = this.createRoom(id, name, opts);
     // Generate random 6-char alphanumeric room code
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -729,14 +1070,19 @@ class RoomManager {
   getRoomList() {
     const list=[];
     for(const [id,room] of this.rooms){
+      // Battle Royale: hide rooms that have sealed (joins refused once active)
+      if (room.mode === 'royale' && !room._isRoyaleOpen()) continue;
       list.push({
         id, name: room.name, mode: room.mode,
         teamSize: room.teamSize,
         players: room.realPlayerCount,
-        maxPlayers: MAX_PLAYERS_PER_ROOM,
+        maxPlayers: room.mode === 'royale' ? ROYALE_MAX_PLAYERS : MAX_PLAYERS_PER_ROOM,
         isCustom: room.isCustom,
         creatorName: room.creatorName,
         code: room.code || null,
+        royaleState: room.mode === 'royale' ? room.royaleState : null,
+        royaleCountdownMs: room.mode === 'royale' && room.royaleState === 'countdown'
+          ? Math.max(0, room.royaleJoinDeadline - Date.now()) : null,
         teams: room.mode==='team' ? Array.from(room.teams.entries()).map(([tid,t])=>({
           id:tid, name:t.name, color:t.color,
           members: t.memberIds.size,

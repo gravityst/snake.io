@@ -105,7 +105,7 @@
 
   const LOCAL_MODES = [
     { id: 'classic', label: 'Classic Arena' },
-    { id: 'royale', label: 'Royal Gauntlet' }
+    { id: 'royale', label: 'Battle Royale' }
   ];
   let selectedLocalMode = localStorage.getItem('selectedLocalMode') || 'classic';
   let bestScore = parseInt(localStorage.getItem('snakeBestScore') || '0', 10) || 0;
@@ -508,7 +508,7 @@
 
   skinsBtn.addEventListener('click', () => {
     startScreen.style.display='none';
-    skinScreen.style.display='block';
+    skinScreen.style.display='flex';
     // Force correct layout regardless of cached HTML structure
     const inner = skinScreen.querySelector('.skin-inner') || skinScreen;
     const preview = document.getElementById('skinPreview');
@@ -589,6 +589,10 @@
 
   // --- Kill feed ---
   let killFeed = [];
+  // Battle Royale state mirrored from server (null when not in BR room)
+  let mpRoyale = null;
+  // Royale "sealed" notice on home/room screens
+  let royaleSealedTimer = 0;
 
   // --- Parallax starfield ---
   const stars = [];
@@ -771,7 +775,11 @@
   createRoomBtn.addEventListener('click', () => { hideAllScreens(); createRoomScreen.style.display='flex'; });
   createRoomBackBtn.addEventListener('click', () => { hideAllScreens(); roomScreen.style.display='flex'; fetchRooms(); roomPollInterval=setInterval(fetchRooms,3000); });
   roomModeSelect.addEventListener('change', () => {
-    roomTeamSizeSelect.style.display = roomModeSelect.value==='team' ? 'block' : 'none';
+    const m = roomModeSelect.value;
+    roomTeamSizeSelect.style.display = m==='team' ? 'block' : 'none';
+    // Also reflect into the wrapping field if the new design uses it
+    const wrap = document.getElementById('teamSizeField');
+    if (wrap) wrap.style.display = m==='team' ? 'block' : 'none';
   });
   createRoomSubmit.addEventListener('click', async () => {
     const rName = roomNameInput.value.trim() || 'Custom Room';
@@ -828,10 +836,20 @@
         card.className = 'room-card' + (room.players >= room.maxPlayers ? ' full' : '');
         const modeBadge = room.mode==='team'
           ? `<span class="mode-badge team">TEAM ${room.teamSize}v${room.teamSize}</span>`
+          : room.mode==='royale'
+          ? `<span class="mode-badge royale">BATTLE ROYALE</span>`
           : `<span class="mode-badge solo">SOLO</span>`;
         const customBadge = room.isCustom ? '<span class="mode-badge custom">CUSTOM</span>' : '';
         const copyBtn = (room.isCustom && room.code) ? `<button class="copy-code-btn" data-code="${room.code}">Copy Code</button>` : '';
-        card.innerHTML = `<div class="room-left">${modeBadge}${customBadge}<span class="room-name">${room.name}</span>${copyBtn}</div><span class="room-players">${room.players}/${room.maxPlayers}</span>`;
+        // BR countdown indicator
+        let extra = '';
+        if (room.mode === 'royale' && room.royaleState === 'countdown' && room.royaleCountdownMs > 0) {
+          const secs = Math.ceil(room.royaleCountdownMs / 1000);
+          extra = `<span class="mode-badge royale" style="background:rgba(251,113,133,0.15);color:#fb7185;border-color:rgba(251,113,133,0.35);">STARTS IN ${secs}s</span>`;
+        } else if (room.mode === 'royale' && room.royaleState === 'lobby') {
+          extra = `<span class="mode-badge royale" style="background:rgba(94,234,212,0.15);color:#5eead4;border-color:rgba(94,234,212,0.35);">WAITING</span>`;
+        }
+        card.innerHTML = `<div class="room-left">${modeBadge}${customBadge}${extra}<span class="room-name">${room.name}</span>${copyBtn}</div><span class="room-players">${room.players}/${room.maxPlayers}</span>`;
         const copyEl = card.querySelector('.copy-code-btn');
         if (copyEl) {
           copyEl.addEventListener('click', (e) => {
@@ -898,6 +916,7 @@
     predict.valid = false;
     currentRoomId = roomId;
     selectedTeamId = teamId ?? -1;
+    mpRoyale = null;  // reset BR state until first server packet arrives
     const name = nameInput.value.trim() || 'Player';
     connect(name, roomId, selectedTeamId);
     hideAllScreens(); hud.style.display='block'; document.body.style.cursor='crosshair'; running=true;
@@ -1285,6 +1304,55 @@
           }
         }
       }
+      // ---- Battle Royale messages ----
+      // 0x08 = periodic royale state, 0x09 = sealed, 0x0A = match start, 0x0B = winner
+      else if (type===0x08) {
+        // [0x08][state u8][countdownMs u16][endMs u16][zoneR u16][zoneTarget u16]
+        //       [damage u8][aliveCount u8][winnerId u16][nameLen u8][name]
+        if (buf.byteLength < 16) return;
+        let o = 1;
+        const stateByte = buf.getUint8(o); o++;
+        const states = ['lobby','countdown','active','ended'];
+        const countdownMs = buf.getUint16(o, true); o += 2;
+        const endMs = buf.getUint16(o, true); o += 2;
+        const zoneR = buf.getUint16(o, true); o += 2;
+        const zoneTarget = buf.getUint16(o, true); o += 2;
+        const damage = buf.getUint8(o); o++;
+        const aliveCount = buf.getUint8(o); o++;
+        const winnerId = buf.getUint16(o, true); o += 2;
+        const nameLen = buf.getUint8(o); o++;
+        let winName = '';
+        if (nameLen > 0 && o + nameLen <= buf.byteLength) {
+          winName = new TextDecoder().decode(new Uint8Array(buf.buffer, o, nameLen));
+        }
+        mpRoyale = {
+          state: states[stateByte] || 'lobby',
+          countdownMs, endMs,
+          zoneR, zoneTarget, damage,
+          aliveCount, winnerId, winName,
+        };
+      }
+      else if (type===0x09) {
+        // Match sealed — joins refused. Show a friendly message and bail back to room list.
+        showRoyaleSealedNotice();
+      }
+      else if (type===0x0A) {
+        // Match started — flash, mute lobby chatter
+        screenShake = Math.max(screenShake, 14);
+        if (mpRoyale) mpRoyale.state = 'active';
+      }
+      else if (type===0x0B) {
+        // Winner declared — record so render shows the win screen
+        if (!mpRoyale) mpRoyale = {};
+        mpRoyale.state = 'ended';
+        if (buf.byteLength >= 4) {
+          mpRoyale.winnerId = buf.getUint16(1, true);
+          const nlen = buf.getUint8(3);
+          if (nlen > 0 && 4 + nlen <= buf.byteLength) {
+            mpRoyale.winName = new TextDecoder().decode(new Uint8Array(buf.buffer, 4, nlen));
+          }
+        }
+      }
     };
     ws.onclose = () => {
       // Only auto-reconnect if this is still the active connection
@@ -1486,14 +1554,143 @@
     ctx.strokeStyle='rgba(255,60,60,0.5)'; ctx.lineWidth=4; ctx.strokeRect(sx,sy,MAP_SIZE,MAP_SIZE);
   }
 
+  // ===== Battle Royale HUD: countdown / damage vignette / winner screen =====
+  function drawRoyaleHUD(dt, cx, cy) {
+    if (!mpRoyale) return;
+    const W = canvas.width, H = canvas.height;
+    // --- Countdown overlay (during lobby/countdown) ---
+    if (mpRoyale.state === 'countdown' || mpRoyale.state === 'lobby') {
+      const secs = Math.ceil((mpRoyale.countdownMs || 0) / 1000);
+      ctx.save();
+      // Top center pill
+      ctx.font = "bold 14px 'Space Grotesk', 'Inter', sans-serif";
+      ctx.textAlign = 'center';
+      const label = mpRoyale.state === 'countdown' ? 'BATTLE ROYALE STARTS IN' : 'WAITING FOR PLAYERS';
+      const sub = mpRoyale.state === 'countdown' ? (secs + 's') : '— join window open —';
+      ctx.fillStyle = 'rgba(10,12,28,0.85)';
+      ctx.strokeStyle = secs <= 5 ? 'rgba(251,113,133,0.9)' : 'rgba(94,234,212,0.7)';
+      const pillW = 280, pillH = 64, px = W/2 - pillW/2, py = 16;
+      roundRect(ctx, px, py, pillW, pillH, 14);
+      ctx.fill(); ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = 'rgba(148,163,184,0.9)';
+      ctx.font = "700 11px 'Inter', sans-serif";
+      ctx.fillText(label, W/2, py + 20);
+      ctx.font = "800 26px 'Space Grotesk', sans-serif";
+      ctx.fillStyle = secs <= 5 ? '#fb7185' : '#5eead4';
+      ctx.fillText(sub, W/2, py + 50);
+      ctx.restore();
+    }
+    // --- Damage vignette while outside the zone (active phase only) ---
+    if (mpRoyale.state === 'active') {
+      const me = snakes.find(s => s.id === myId);
+      if (me && me.alive && me.segments.length > 0) {
+        const h = me.segments[0];
+        const dx = h.x - 0, dy = h.y - 0;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > (mpRoyale.zoneR || 0)) {
+          const pulse = 0.35 + Math.sin(animTime * 4) * 0.15;
+          const grad = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.2, W/2, H/2, Math.max(W,H)*0.7);
+          grad.addColorStop(0, 'rgba(251,113,133,0)');
+          grad.addColorStop(1, `rgba(251,113,133,${pulse})`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, W, H);
+          // Warning text
+          ctx.save();
+          ctx.font = "800 16px 'Space Grotesk', sans-serif";
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#fb7185';
+          ctx.shadowColor = 'rgba(0,0,0,0.6)';
+          ctx.shadowBlur = 8;
+          ctx.fillText('⚠  GET BACK TO THE ZONE  ⚠', W/2, 96);
+          ctx.font = "600 12px 'Inter', sans-serif";
+          ctx.fillStyle = 'rgba(255,255,255,0.7)';
+          ctx.fillText(`Losing ${mpRoyale.damage}/s`, W/2, 116);
+          ctx.restore();
+        }
+      }
+      // Live "X remaining" pill, top-center
+      ctx.save();
+      ctx.font = "700 12px 'Inter', sans-serif";
+      ctx.textAlign = 'center';
+      const txt = `${mpRoyale.aliveCount || 0} ALIVE`;
+      const tw = ctx.measureText(txt).width + 28;
+      ctx.fillStyle = 'rgba(10,12,28,0.8)';
+      ctx.strokeStyle = 'rgba(94,234,212,0.6)';
+      roundRect(ctx, W/2 - tw/2, 16, tw, 28, 14);
+      ctx.fill(); ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.fillStyle = '#5eead4';
+      ctx.fillText(txt, W/2, 34);
+      ctx.restore();
+    }
+    // --- Winner screen ---
+    if (mpRoyale.state === 'ended') {
+      const endSecs = Math.ceil((mpRoyale.endMs || 0) / 1000);
+      ctx.save();
+      ctx.fillStyle = 'rgba(6,8,26,0.7)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'center';
+      const won = mpRoyale.winnerId === myId;
+      ctx.font = "800 56px 'Space Grotesk', sans-serif";
+      ctx.fillStyle = won ? '#5eead4' : '#a78bfa';
+      ctx.shadowColor = won ? 'rgba(94,234,212,0.6)' : 'rgba(167,139,250,0.5)';
+      ctx.shadowBlur = 30;
+      ctx.fillText(won ? 'VICTORY' : 'MATCH OVER', W/2, H/2 - 30);
+      ctx.shadowBlur = 0;
+      ctx.font = "600 18px 'Inter', sans-serif";
+      ctx.fillStyle = '#f1f5f9';
+      const sub = mpRoyale.winName ? `Winner: ${mpRoyale.winName}` : 'No survivors';
+      ctx.fillText(sub, W/2, H/2 + 6);
+      ctx.font = "500 13px 'Inter', sans-serif";
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(`Next round in ${endSecs}s`, W/2, H/2 + 34);
+      ctx.restore();
+    }
+  }
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  function showRoyaleSealedNotice() {
+    royaleSealedTimer = 4.0;
+    try {
+      if (ws && ws.readyState <= 1) ws.close();
+    } catch {}
+    // Bounce back to room list
+    setTimeout(() => {
+      const rs = document.getElementById('roomScreen');
+      const ss = document.getElementById('startScreen');
+      if (rs) rs.style.display = 'flex';
+      if (ss) ss.style.display = 'none';
+    }, 100);
+  }
+
   function drawRoyaleRing(cx, cy) {
-    if (!localGame || localGame.mode !== 'royale') return;
-    // World origin projected to canvas (we're already inside the zoom transform,
-    // so radius is in world units — no extra zoom multiplier).
+    // Source the radius from either local royale mode OR the server royale state
+    let r = null;
+    let pulse = 1;
+    if (localGame && localGame.mode === 'royale') {
+      r = localGame.safeRadius;
+      pulse = 1 + Math.sin(localGame.shrinkPulse) * 0.06;
+    } else if (mpRoyale && (mpRoyale.state === 'active' || mpRoyale.state === 'ended')) {
+      r = mpRoyale.zoneR;
+      pulse = 1 + Math.sin(animTime * 2) * 0.04;
+    } else {
+      return;
+    }
+    // World origin projected to canvas (we're already inside the zoom transform).
     const ox = canvas.width / 2 - cx;
     const oy = canvas.height / 2 - cy;
-    const r = localGame.safeRadius;
-    const pulse = 1 + Math.sin(localGame.shrinkPulse) * 0.06;
     // Danger fill — everything outside the safe zone is deadly.
     // Use even-odd fill so we paint a ring from the canvas edge to the safe radius.
     const halfW = canvas.width / (2 * zoom);
@@ -2057,6 +2254,7 @@
     // Screen-space overlays (outside zoom transform)
     drawKillFeed(dt);
     drawSpeedLines(dt);
+    drawRoyaleHUD(dt, cx, cy);
     // Spectate text
     if (spectateTimer > 0) {
       ctx.font = 'bold 20px "Segoe UI",sans-serif';

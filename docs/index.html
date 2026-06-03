@@ -447,6 +447,7 @@
     .mode-badge.solo   { background: var(--teal-soft); color: var(--teal); border: 1px solid rgba(94,234,212,0.35); }
     .mode-badge.team   { background: var(--amber-soft); color: var(--amber); border: 1px solid rgba(251,191,36,0.35); }
     .mode-badge.custom { background: var(--violet-soft); color: var(--violet); border: 1px solid rgba(167,139,250,0.35); }
+    .mode-badge.royale { background: var(--rose-soft); color: var(--rose); border: 1px solid rgba(251,113,133,0.4); }
     .room-players {
       font-size: 14px;
       font-weight: 700;
@@ -1233,6 +1234,7 @@
           <select id="roomModeSelect" class="select">
             <option value="solo">Solo &mdash; Free for All</option>
             <option value="team">Team Battle</option>
+            <option value="royale">Battle Royale &mdash; Last Snake Standing</option>
           </select>
         </div>
         <div class="field" id="teamSizeField" style="display:none;">
@@ -1465,7 +1467,7 @@
       update();
     })();
   </script>
-  <script src="local-game.js?v=21"></script>
-  <script src="game.js?v=21"></script>
+  <script src="local-game.js?v=22"></script>
+  <script src="game.js?v=22"></script>
 </body>
 </html>
