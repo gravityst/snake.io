@@ -1447,13 +1447,16 @@
       screenIds.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        // Mirror existing display state into .show class via MutationObserver
+        // Mirror inline display changes into the .show class. CRITICAL: when
+        // style.display is the empty string (no inline style), keep the
+        // HTML-default class alone — otherwise we'd strip the initial
+        // `class="screen show"` from the home screen on load → blank page.
         const sync = () => {
-          const visible = el.style.display && el.style.display !== 'none';
-          el.classList.toggle('show', visible);
+          const d = el.style.display;
+          if (d === 'none') el.classList.remove('show');
+          else if (d) el.classList.add('show');
         };
         new MutationObserver(sync).observe(el, { attributes: true, attributeFilter: ['style'] });
-        sync();
       });
     })();
 
@@ -1467,7 +1470,7 @@
       update();
     })();
   </script>
-  <script src="local-game.js?v=22"></script>
-  <script src="game.js?v=22"></script>
+  <script src="local-game.js?v=23"></script>
+  <script src="game.js?v=23"></script>
 </body>
 </html>
