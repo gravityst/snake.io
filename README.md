@@ -15,6 +15,8 @@ A slither.io-inspired multiplayer snake game with neon visuals, real-time WebSoc
 - **43 skins** — Solid, striped, and multicolor patterns (Rainbow, Cyberpunk, Galaxy, etc.)
 - **9 food tiers** — Tiny dots to rare glowing orbs worth 35 points
 - **12 moving mega orbs** — Drift across the map, worth 50-80 points each
+- **Royal Gauntlet mode** — A shrinking safe zone adds pressure to every run
+- **Progression unlocks** — Rare skins become available by beating high scores
 - **3 AI skill tiers** — Beginner, Amateur, and Advanced bots with predictive hunting
 - **Dynamic thickness** — Snakes get visibly fatter as they grow, not just longer
 - **Camera zoom** — Zooms out as you grow so you can see more of the map

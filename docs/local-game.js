@@ -4,7 +4,7 @@
 // ============================================================
 
 class LocalGame {
-  constructor(playerName, skinIdx) {
+  constructor(playerName, skinIdx, mode = 'classic') {
     this.MAP_SIZE = 14000;
     this.FOOD_COUNT = 1800;
     this.SNAKE_SPEED = 280;
@@ -16,6 +16,11 @@ class LocalGame {
     this.BOOST_SHRINK_RATE = 2.5;
     this.BOT_COUNT = 25;
     this.MEGA_ORB_COUNT = 12;
+    this.mode = mode;
+    this.safeRadius = this.MAP_SIZE / 2 - 250;
+    this.shrinkDelay = 10;
+    this.shrinkRate = 22;
+    this.shrinkPulse = 0;
 
     this.snakes = [];
     this.food = [];
@@ -130,6 +135,15 @@ class LocalGame {
     // Collisions
     this._checkCollisions();
 
+    // Royal Gauntlet safe zone
+    if (this.mode === 'royale') {
+      this.shrinkDelay = Math.max(0, this.shrinkDelay - dt);
+      if (this.shrinkDelay <= 0) {
+        this.safeRadius = Math.max(600, this.safeRadius - this.shrinkRate * dt);
+        this.shrinkPulse = (this.shrinkPulse + dt * 2) % (Math.PI * 2);
+      }
+    }
+
     // Respawn dead bots
     for (const s of this.snakes) { if (s.isBot && !s.alive) this._respawnBot(s); }
 
@@ -151,6 +165,10 @@ class LocalGame {
     head.y += Math.sin(snake.angle)*speed*dt;
     const h = this.MAP_SIZE/2;
     if (head.x<-h||head.x>h||head.y<-h||head.y>h) { this._kill(snake, null); return; }
+    if (this.mode === 'royale') {
+      const dist = Math.sqrt(head.x * head.x + head.y * head.y);
+      if (dist > this.safeRadius) { this._kill(snake, null); return; }
+    }
     while (snake.segments.length >= 2) {
       const dx=head.x-snake.segments[1].x, dy=head.y-snake.segments[1].y;
       if (dx*dx+dy*dy < this.SEGMENT_SPACING**2) break;
@@ -233,6 +251,21 @@ class LocalGame {
     snake.skin=Math.floor(Math.random()*43); snake.skill=this._randomSkill();
   }
 
+  // Royal Gauntlet: head back to origin if the safe zone is closing in.
+  // Margin scales with snake length so longer bots U-turn earlier.
+  _fleeShrinkZone(s) {
+    if (this.mode !== 'royale') return false;
+    const h = s.segments[0];
+    const dist = Math.sqrt(h.x * h.x + h.y * h.y);
+    const margin = 80 + s.segments.length * 1.5;
+    if (dist > this.safeRadius - margin) {
+      s.targetAngle = Math.atan2(-h.y, -h.x);
+      s.boosting = dist > this.safeRadius - margin * 0.4 && s.score > 10;
+      return true;
+    }
+    return false;
+  }
+
   // --- Bot AI ---
   _botAI(snake, dt) {
     if (snake.skill===2) this._advAI(snake,dt);
@@ -244,6 +277,7 @@ class LocalGame {
     s.botTimer-=dt; if(s.botTimer>0) return; s.botTimer=0.5+Math.random()*0.6;
     const h=s.segments[0], wall=this.MAP_SIZE/2-250;
     if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=false;return;}
+    if(this._fleeShrinkZone(s)) return;
     // Basic threat avoidance — don't blindly crash into other snakes
     for(const o of this.snakes){
       if(o.id===s.id||!o.alive)continue;
@@ -268,6 +302,7 @@ class LocalGame {
     s.botTimer-=dt; if(s.botTimer>0) return; s.botTimer=0.3+Math.random()*0.4;
     const h=s.segments[0], wall=this.MAP_SIZE/2-250;
     if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=true;return;}
+    if(this._fleeShrinkZone(s)) return;
     let cl=null,cSq=450*450;
     for(const f of this.food){const dx=f.x-h.x;if(dx>450||dx<-450)continue;const dy=f.y-h.y;if(dy>450||dy<-450)continue;const d2=dx*dx+dy*dy;if(d2<cSq){cSq=d2;cl=f;}}
     for(const o of this.snakes){
@@ -283,6 +318,7 @@ class LocalGame {
     s.botTimer-=dt; if(s.botTimer>0) return; s.botTimer=0.08;
     const h=s.segments[0], wall=this.MAP_SIZE/2-250;
     if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=false;return;}
+    if(this._fleeShrinkZone(s)) return;
     // Avoid body segments ahead
     for(const o of this.snakes){
       if(o.id===s.id||!o.alive)continue;
