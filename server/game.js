@@ -5,8 +5,8 @@ const WebSocket = require('ws');
 // =====================================================
 
 const MAP_SIZE = 14000;
-const FOOD_COUNT = 1400;
-const MAX_FOOD = 1800;
+const FOOD_COUNT = 2100;
+const MAX_FOOD = 2600;
 const SNAKE_SPEED = 280;
 const BOOST_SPEED = 500;
 const SEGMENT_SPACING = 24;
