@@ -1076,13 +1076,96 @@
 
   // --- Parallax starfield ---
   const stars = [];
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 320; i++) {
     stars.push({
       x: (Math.random() - 0.5) * MAP_SIZE * 1.5,
       y: (Math.random() - 0.5) * MAP_SIZE * 1.5,
-      size: 0.5 + Math.random() * 1.5,
-      brightness: 0.2 + Math.random() * 0.5
+      size: 0.4 + Math.random() * 1.8,
+      brightness: 0.25 + Math.random() * 0.65,
+      twinkleSpeed: 0.6 + Math.random() * 1.4,
+      twinklePhase: Math.random() * Math.PI * 2,
+      tint: Math.random() < 0.15 ? '#a78bfa' : Math.random() < 0.25 ? '#5eead4' : '#ffffff',
     });
+  }
+  // Nebula cloud blobs — atmospheric color washes drifting in parallax
+  const NEBULA_COLORS = ['#1e1b4b', '#312e81', '#0e7490', '#5b21b6', '#0c4a6e', '#581c87'];
+  const nebulae = [];
+  for (let i = 0; i < 8; i++) {
+    nebulae.push({
+      x: (Math.random() - 0.5) * MAP_SIZE * 1.4,
+      y: (Math.random() - 0.5) * MAP_SIZE * 1.4,
+      radius: 600 + Math.random() * 900,
+      color: NEBULA_COLORS[i % NEBULA_COLORS.length],
+      alpha: 0.18 + Math.random() * 0.18,
+      driftAngle: Math.random() * Math.PI * 2,
+    });
+  }
+  // Pre-rendered nebula sprite — single radial-gradient sprite scaled per cloud
+  const nebulaSprite = (() => {
+    const s = document.createElement('canvas');
+    s.width = s.height = 256;
+    const sx = s.getContext('2d');
+    const g = sx.createRadialGradient(128, 128, 10, 128, 128, 128);
+    g.addColorStop(0, 'rgba(255,255,255,0.85)');
+    g.addColorStop(0.4, 'rgba(255,255,255,0.30)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    sx.fillStyle = g;
+    sx.fillRect(0, 0, 256, 256);
+    return s;
+  })();
+
+  // Food orb sprite cache — pre-rendered glossy orbs keyed by (color, tier, size)
+  // so we don't re-run createRadialGradient × N every frame.
+  const foodSpriteCache = new Map();
+  function getFoodSprite(colorIdx, tier, sizeKey) {
+    const key = colorIdx + '_' + tier + '_' + sizeKey;
+    let entry = foodSpriteCache.get(key);
+    if (entry) return entry;
+    const r = sizeKey;
+    const pad = Math.ceil(r * 1.4);
+    const size = (r + pad) * 2;
+    const off = document.createElement('canvas');
+    off.width = off.height = size;
+    const fc = off.getContext('2d');
+    const cx = size / 2, cy = size / 2;
+    const color = COLORS[colorIdx] || COLORS[0];
+    const colorFull = hexFull(color);
+    // Soft outer glow — modest, app-aligned
+    const haloR = r + pad;
+    const haloA = tier >= 4 ? 0.34 : tier >= 2 ? 0.22 : 0.14;
+    const halo = fc.createRadialGradient(cx, cy, r * 0.5, cx, cy, haloR);
+    halo.addColorStop(0, colorFull + Math.floor(haloA * 255).toString(16).padStart(2, '0'));
+    halo.addColorStop(1, colorFull + '00');
+    fc.fillStyle = halo;
+    fc.beginPath(); fc.arc(cx, cy, haloR, 0, Math.PI * 2); fc.fill();
+    // Core orb — soft gradient (no harsh white center)
+    const core = fc.createRadialGradient(cx - r * 0.32, cy - r * 0.32, r * 0.1, cx, cy, r);
+    core.addColorStop(0, lighten(colorFull, 0.55));
+    core.addColorStop(0.6, colorFull);
+    core.addColorStop(1, darken(colorFull, 0.25));
+    fc.fillStyle = core;
+    fc.beginPath(); fc.arc(cx, cy, r, 0, Math.PI * 2); fc.fill();
+    // Subtle highlight (top-left)
+    fc.fillStyle = 'rgba(255,255,255,0.50)';
+    fc.beginPath();
+    fc.ellipse(cx - r * 0.32, cy - r * 0.36, r * 0.30, r * 0.20, -Math.PI / 4, 0, Math.PI * 2);
+    fc.fill();
+    entry = { canvas: off, half: size / 2 };
+    foodSpriteCache.set(key, entry);
+    return entry;
+  }
+  function lighten(hex, amt) {
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    const nr = Math.min(255, Math.round(r + (255-r)*amt));
+    const ng = Math.min(255, Math.round(g + (255-g)*amt));
+    const nb = Math.min(255, Math.round(b + (255-b)*amt));
+    return '#' + nr.toString(16).padStart(2,'0') + ng.toString(16).padStart(2,'0') + nb.toString(16).padStart(2,'0');
+  }
+  function darken(hex, amt) {
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    return '#' + Math.round(r*(1-amt)).toString(16).padStart(2,'0')
+               + Math.round(g*(1-amt)).toString(16).padStart(2,'0')
+               + Math.round(b*(1-amt)).toString(16).padStart(2,'0');
   }
 
   // --- Score counter animation ---
@@ -2413,41 +2496,19 @@
       const sx=f.x-cx+midX,sy=f.y-cy+midY;
       if(sx<midX-halfW||sx>midX+halfW||sy<midY-halfH||sy>midY+halfH) continue;
       const tier=f.tier||0;
-      const pulse=0.93+0.07*Math.sin(animTime*3+f.x*0.01);
+      const pulse=0.95+0.05*Math.sin(animTime*3+f.x*0.01);
       let spawnScale = 1;
       if (f.spawnTime !== undefined && animTime - f.spawnTime < 0.3) {
         const t = animTime - f.spawnTime;
         spawnScale = Math.min(1, (t / 0.3) * 1.2 - 0.2 * Math.sin(t / 0.3 * Math.PI));
         spawnScale = Math.max(0, spawnScale);
       }
-      const r=f.radius*pulse*spawnScale;
-      const color=COLORS[f.color]||COLORS[0];
-      const colorFull=hexFull(color);
-      // Outer glow halo — pulses gently, brighter for higher tiers
-      const haloR = r * (tier >= 4 ? 3.2 : tier >= 2 ? 2.4 : 1.9);
-      const haloAlpha = tier >= 4 ? 0.30 : tier >= 2 ? 0.22 : 0.16;
-      const halo = ctx.createRadialGradient(sx, sy, r * 0.6, sx, sy, haloR);
-      halo.addColorStop(0, colorFull + Math.floor(haloAlpha * 255).toString(16).padStart(2, '0'));
-      halo.addColorStop(1, colorFull + '00');
-      ctx.fillStyle = halo;
-      ctx.beginPath(); ctx.arc(sx, sy, haloR, 0, Math.PI * 2); ctx.fill();
-      // Core orb — radial gradient (bright center → saturated rim)
-      const core = ctx.createRadialGradient(sx - r*0.35, sy - r*0.35, r * 0.05, sx, sy, r);
-      core.addColorStop(0, '#ffffff');
-      core.addColorStop(0.35, colorFull + 'ee');
-      core.addColorStop(1, colorFull);
-      ctx.fillStyle = core;
-      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
-      // Crisp specular highlight (top-left)
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.beginPath();
-      ctx.arc(sx - r * 0.35, sy - r * 0.4, r * 0.28, 0, Math.PI * 2);
-      ctx.fill();
-      // Soft secondary highlight (bottom rim glow)
-      ctx.fillStyle = 'rgba(255,255,255,0.18)';
-      ctx.beginPath();
-      ctx.arc(sx + r * 0.15, sy + r * 0.35, r * 0.18, 0, Math.PI * 2);
-      ctx.fill();
+      // Quantize the base radius so we share sprite cache entries across orbs.
+      const baseR = Math.max(2, Math.round(f.radius));
+      const sprite = getFoodSprite(f.color, tier, baseR);
+      const scale = pulse * spawnScale;
+      const drawSize = sprite.half * 2 * scale;
+      ctx.drawImage(sprite.canvas, sx - drawSize/2, sy - drawSize/2, drawSize, drawSize);
     }
     ctx.globalAlpha=1;
   }
@@ -2535,36 +2596,28 @@
       for (let i = ss.length - 2; i >= 0; i--) ctx.lineTo(ss[i].x, ss[i].y);
       ctx.stroke();
     }
-    // Per-segment SMOOTH curves so turns don't show as kinked polyline corners.
-    // Each segment renders as a quadratic Bezier from the previous midpoint
-    // through ss[i] to the next midpoint — adjacent segments share endpoints
-    // so the entire body draws as one continuous smooth curve.
+    // Per-segment smooth curves: single quadratic Bezier between consecutive
+    // midpoints with the actual segment as control point. Adjacent segments
+    // share midpoint endpoints so the whole body reads as one smooth curve,
+    // with only one curveTo per segment (vs two before — half the draw cost).
     ctx.globalAlpha = 0.98;
     for (let i = ss.length - 1; i >= 1; i--) {
       const a = ss[i], b = ss[i-1];
-      // Cull off-screen segments
       if (Math.max(a.x, b.x) < midX - halfW || Math.min(a.x, b.x) > midX + halfW ||
           Math.max(a.y, b.y) < midY - halfH || Math.min(a.y, b.y) > midY + halfH) continue;
       const tailT = i / ss.length;
       let w = dotR * 2 * (1 - tailT * 0.22);
-      // Evolution: score>=2000 body pulses gently
       if (score >= 2000) w *= 1 + 0.04 * Math.sin(animTime * 4 + i * 0.3);
       ctx.lineWidth = w;
       ctx.strokeStyle = getSegColor(snake, i);
-      // Start at midpoint to the tail-ward neighbor, end at midpoint to the
-      // head-ward neighbor, with the segment itself as the control point.
-      const aNext = ss[i + 1]; // may be undefined for the very tail
-      const bPrev = ss[i - 2]; // may be undefined approaching the head
+      const aNext = ss[i + 1];
       const sx = aNext ? (a.x + aNext.x) * 0.5 : a.x;
       const sy = aNext ? (a.y + aNext.y) * 0.5 : a.y;
-      const ex = bPrev ? (b.x + bPrev.x) * 0.5 : b.x;
-      const ey = bPrev ? (b.y + bPrev.y) * 0.5 : b.y;
-      const mABx = (a.x + b.x) * 0.5;
-      const mABy = (a.y + b.y) * 0.5;
+      const ex = (a.x + b.x) * 0.5;
+      const ey = (a.y + b.y) * 0.5;
       ctx.beginPath();
       ctx.moveTo(sx, sy);
-      ctx.quadraticCurveTo(a.x, a.y, mABx, mABy);
-      ctx.quadraticCurveTo(b.x, b.y, ex, ey);
+      ctx.quadraticCurveTo(a.x, a.y, ex, ey);
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
@@ -2676,13 +2729,35 @@
 
   // --- Parallax starfield ---
   function drawStars(cx, cy) {
-    const midX = canvas.width / 2, midY = canvas.height / 2;
+    const W = canvas.width, H = canvas.height;
+    const midX = W / 2, midY = H / 2;
+    // Nebula clouds — soft tinted radial gradients drifting in parallax,
+    // additive blend so they "glow" rather than block out stars behind them.
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const n of nebulae) {
+      const nx = n.x * 0.15 - cx * 0.15 + midX;
+      const ny = n.y * 0.15 - cy * 0.15 + midY;
+      const nr = n.radius;
+      if (nx + nr < 0 || nx - nr > W || ny + nr < 0 || ny - nr > H) continue;
+      ctx.globalAlpha = n.alpha;
+      const grad = ctx.createRadialGradient(nx, ny, nr * 0.05, nx, ny, nr);
+      grad.addColorStop(0, n.color);
+      grad.addColorStop(1, n.color + '00');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(nx, ny, nr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    // Stars — gentle twinkle per-star
     for (const star of stars) {
       const sx = star.x * 0.3 - cx * 0.3 + midX;
       const sy = star.y * 0.3 - cy * 0.3 + midY;
-      if (sx < -10 || sx > canvas.width + 10 || sy < -10 || sy > canvas.height + 10) continue;
-      ctx.globalAlpha = star.brightness * 0.4;
-      ctx.fillStyle = '#fff';
+      if (sx < -10 || sx > W + 10 || sy < -10 || sy > H + 10) continue;
+      const tw = 0.55 + 0.45 * Math.sin(animTime * star.twinkleSpeed + star.twinklePhase);
+      ctx.globalAlpha = star.brightness * tw * 0.85;
+      ctx.fillStyle = star.tint;
       ctx.beginPath();
       ctx.arc(sx, sy, star.size, 0, Math.PI * 2);
       ctx.fill();
