@@ -37,7 +37,7 @@ const SKINS_COUNT = 43;
 //   'active'    — joins LOCKED, room hidden from list, zone shrinks, no respawn
 //   'ended'     — winner declared, room resets to lobby after a short delay
 const ROYALE_JOIN_WINDOW_MS = 30000;
-const ROYALE_MAX_PLAYERS = 24;
+const ROYALE_MAX_PLAYERS = 20;
 
 // Each phase: hold the zone where it is for `hold` seconds, then shrink to
 // `radius` over `shrinkTime` seconds. While outside, lose `damage` score/sec.
@@ -1011,6 +1011,7 @@ class RoomManager {
     this.createRoom('room-0', 'Free For All', { mode: 'solo' });
     this.createRoom('room-1', 'Neon Arena', { mode: 'solo' });
     this.createRoom('room-2', 'Team Battle', { mode: 'team', teamSize: 2, maxTeams: 8 });
+    this.createRoom('room-3', 'Battle Royale', { mode: 'royale' });
 
     // noServer mode: upgrade routing is handled in index.js so multiple
     // games (snake, click-battle) can share one Render service.
@@ -1028,11 +1029,17 @@ class RoomManager {
     return room;
   }
 
-  createCustomRoom(name, mode, teamSize, creatorName) {
-    // BR is AI-only for now; force any "royale" custom-room request to solo.
-    if (mode === 'royale') mode = 'solo';
+  createCustomRoom(name, mode, teamSize, creatorName, royaleConfig) {
+    if (!['solo', 'team', 'royale'].includes(mode)) mode = 'solo';
     const id = `custom-${this.nextCustomId++}`;
-    const opts = { mode, teamSize: teamSize || 2, maxTeams: Math.floor(30/(teamSize||2)), isCustom: true, creatorName };
+    const opts = {
+      mode,
+      teamSize: teamSize || 2,
+      maxTeams: Math.floor(30/(teamSize||2)),
+      isCustom: true,
+      creatorName,
+      royaleConfig: royaleConfig || null,
+    };
     const room = this.createRoom(id, name, opts);
     // Generate random 6-char alphanumeric room code
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';

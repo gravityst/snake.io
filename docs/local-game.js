@@ -4,7 +4,7 @@
 // ============================================================
 
 class LocalGame {
-  constructor(playerName, skinIdx, mode = 'classic') {
+  constructor(playerName, skinIdx, mode = 'classic', config = {}) {
     this.MAP_SIZE = 14000;
     this.FOOD_COUNT = 2600;
     this.SNAKE_SPEED = 280;
@@ -14,30 +14,48 @@ class LocalGame {
     this.INITIAL_LENGTH = 10;
     this.HEAD_RADIUS = 14;
     this.BOOST_SHRINK_RATE = 2.5;
-    this.BOT_COUNT = 25;
-    this.MEGA_ORB_COUNT = 12;
     this.mode = mode;
-    // Battle Royale phased safe zone (Fortnite-style).
-    // Each phase: HOLD at current radius for `hold` seconds, then SHRINK to
-    // `radius` over `shrinkTime` seconds, then HOLD the next phase, etc.
-    // Tunable: change the array and the match feel changes.
-    this.ROYALE_PHASES = [
-      { hold: 60, shrinkTime: 30, radius: 1800 },
-      { hold: 45, shrinkTime: 25, radius: 1000 },
-      { hold: 35, shrinkTime: 20, radius:  500 },
-      { hold: 25, shrinkTime: 15, radius:  220 },
-      { hold: 20, shrinkTime: 12, radius:   80 },
-    ];
-    this.safeRadius     = mode === 'royale' ? 2800 : this.MAP_SIZE / 2 - 250;
+    this.config = config;
+
+    // ----------- Mode-specific config -----------
+    if (mode === 'royale') {
+      this.BOT_COUNT = 19;            // player + 19 bots = 20 total
+      this.MEGA_ORB_COUNT = config.megaOrbs ?? 8;
+      this.NO_RESPAWN = true;         // BR: dead is dead
+      // BR starts at near-max radius, shrinks across 5 phases.
+      // Optional config: startRadius, phaseSpeed (1=normal, <1 faster).
+      const startR = config.startRadius ?? Math.floor(this.MAP_SIZE / 2 - 500);
+      const sp = Math.max(0.5, Math.min(2, config.phaseSpeed ?? 1));
+      this.ROYALE_PHASES = [
+        { hold: 30 * sp, shrinkTime: 30 * sp, radius: Math.max(120, Math.floor(startR * 0.55)) },
+        { hold: 22 * sp, shrinkTime: 25 * sp, radius: Math.max(100, Math.floor(startR * 0.32)) },
+        { hold: 16 * sp, shrinkTime: 20 * sp, radius: Math.max( 80, Math.floor(startR * 0.16)) },
+        { hold: 12 * sp, shrinkTime: 16 * sp, radius: Math.max( 60, Math.floor(startR * 0.07)) },
+        { hold:  8 * sp, shrinkTime: 12 * sp, radius:  Math.max( 40, Math.floor(startR * 0.02)) },
+      ];
+      this.safeRadius = startR;
+      // Pre-match waiting room: 5 seconds for single-player.
+      this.matchState = 'countdown';
+      this.matchCountdown = 5.0;
+      // Victory state when player wins
+      this.victoryFlag = false;
+      this.victoryAt = 0;
+    } else {
+      this.BOT_COUNT = 25;
+      this.MEGA_ORB_COUNT = 12;
+      this.NO_RESPAWN = false;
+      this.safeRadius = this.MAP_SIZE / 2 - 250;
+      this.matchState = 'active';
+      this.matchCountdown = 0;
+      this.victoryFlag = false;
+    }
     this.safePrevRadius = this.safeRadius;
     this.safeTargetRadius = this.safeRadius;
     this.shrinkPulse = 0;
     this.royalePhaseIdx   = 0;
-    this.royalePhaseState = 'hold';   // 'hold' | 'shrink' | 'done'
+    this.royalePhaseState = 'hold';
     this.royalePhaseTimer = 0;
     this.royaleEvents     = [];
-    // Fixed center at origin — drifting made the boundary appear to "swim"
-    // across the world as the camera followed the player.
     this.safeCenterX = 0;
     this.safeCenterY = 0;
 
@@ -47,6 +65,9 @@ class LocalGame {
     this.nextId = 1;
     this.playerId = null;
     this.deathCallback = null;
+
+    // Optional bot-difficulty override from config: 'easy' | 'mixed' | 'hard'
+    this._botDifficulty = config.botDifficulty || 'mixed';
 
     // Spawn player
     const player = this._createSnake(playerName, false, skinIdx);
@@ -119,10 +140,22 @@ class LocalGame {
   _thickness(snake) { return 1 + Math.sqrt(snake.score) / 45 + snake.score / 8000; }
 
   _randomSkill() {
+    if (this._botDifficulty === 'easy') {
+      const r = Math.random();
+      if (r < 0.05) return 1;
+      return 0;
+    }
+    if (this._botDifficulty === 'hard') {
+      const r = Math.random();
+      if (r < 0.55) return 2;
+      if (r < 0.95) return 1;
+      return 0;
+    }
+    // mixed (default)
     const r = Math.random();
-    if (r < 0.20) return 2;  // 20% hard
-    if (r < 0.60) return 1;  // 40% medium
-    return 0;                 // 40% easy
+    if (r < 0.20) return 2;
+    if (r < 0.60) return 1;
+    return 0;
   }
 
   _createSnake(name, isBot, skinIdx, skill) {
@@ -171,6 +204,21 @@ class LocalGame {
 
   // --- Tick ---
   tick(dt) {
+    // Pre-match countdown — freeze the world so players can read the timer
+    if (this.mode === 'royale' && this.matchState === 'countdown') {
+      this.matchCountdown -= dt;
+      if (this.matchCountdown <= 0) {
+        this.matchCountdown = 0;
+        this.matchState = 'active';
+        this.royalePhaseTimer = 0;  // restart phase clock on go
+      }
+      return;
+    }
+    // Victory state — also freeze
+    if (this.mode === 'royale' && this.matchState === 'victory') {
+      return;
+    }
+
     // Mega orbs
     const half = this.MAP_SIZE/2-50;
     for (const m of this.megaOrbs) {
@@ -219,8 +267,20 @@ class LocalGame {
       this.shrinkPulse = 0; // no bobbing
     }
 
-    // Respawn dead bots
-    for (const s of this.snakes) { if (s.isBot && !s.alive) this._respawnBot(s); }
+    // Respawn dead bots (classic only — BR is last-snake-standing)
+    if (!this.NO_RESPAWN) {
+      for (const s of this.snakes) { if (s.isBot && !s.alive) this._respawnBot(s); }
+    }
+
+    // BR victory detection: trigger when only the player remains alive
+    if (this.mode === 'royale' && this.matchState === 'active') {
+      const aliveSnakes = this.snakes.filter(s => s.alive);
+      if (aliveSnakes.length === 1 && aliveSnakes[0].id === this.playerId) {
+        this.matchState = 'victory';
+        this.victoryFlag = true;
+        this.victoryAt = Date.now();
+      }
+    }
 
     // Replenish
     while (this.food.length < this.FOOD_COUNT) this.food.push(this._createFood());
@@ -244,6 +304,7 @@ class LocalGame {
     // Drain events for the client to display as banner notifications
     const events = this.royaleEvents;
     this.royaleEvents = [];
+    const playerSnake = this.snakes.find(s => s.id === this.playerId);
     return {
       state: this.royalePhaseState,
       phaseIdx: this.royalePhaseIdx,
@@ -254,9 +315,14 @@ class LocalGame {
       centerX: this.safeCenterX,
       centerY: this.safeCenterY,
       alive: this.snakes.filter(s => s.alive).length,
+      total: this.snakes.length,
       events,
       winner: winner && !winner.isBot ? winner.name : null,
-      isDead: !this.snakes.find(s => !s.isBot && s.alive),
+      isDead: !(playerSnake && playerSnake.alive),
+      matchState: this.matchState,       // 'countdown' | 'active' | 'victory'
+      matchCountdown: this.matchCountdown,
+      victoryFlag: this.victoryFlag,
+      playerScore: playerSnake ? playerSnake.score : 0,
     };
   }
 
@@ -354,7 +420,10 @@ class LocalGame {
       });
     }
     if (snake.id === this.playerId && this.deathCallback) {
-      this.deathCallback(snake.score);
+      const aliveAfter = this.snakes.filter(s => s.alive).length;
+      // BR rank: if N others still alive when you die, you placed (N+1)th.
+      const rank = this.mode === 'royale' ? aliveAfter + 1 : null;
+      this.deathCallback(snake.score, rank);
     }
   }
 

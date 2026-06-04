@@ -1238,9 +1238,9 @@
         <div class="field">
           <div class="field-label">Game mode</div>
           <select id="roomModeSelect" class="select">
-            <option value="solo">Solo &mdash; Free for All</option>
+            <option value="solo" selected>Normal &mdash; Free for All</option>
             <option value="team">Team Battle</option>
-            <option value="royale" disabled>Battle Royale &mdash; Coming soon</option>
+            <option value="royale">Battle Royale &mdash; Last snake standing</option>
           </select>
         </div>
         <div class="field" id="teamSizeField" style="display:none;">
@@ -1249,6 +1249,56 @@
             <option value="2">2 players per team</option>
             <option value="3">3 players per team</option>
           </select>
+        </div>
+        <!-- BR-only settings panel ----------------------------------------->
+        <div id="brSettingsPanel" style="display:none;">
+          <div style="
+            background: rgba(251,113,133,0.08);
+            border: 1px solid rgba(251,113,133,0.35);
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: #fecdd3;
+            line-height: 1.5;
+          ">
+            <strong style="color:#fb7185;letter-spacing:0.4px;">⚠ NO RESPAWN</strong><br>
+            20 snakes drop in. Zone shrinks in phases. Last snake standing
+            wins the Victory Royale. Match locks once it starts.
+          </div>
+          <div class="field">
+            <div class="field-label">Starting zone size</div>
+            <select id="brStartSize" class="select">
+              <option value="max" selected>Max &mdash; full map (slow burn)</option>
+              <option value="large">Large &mdash; ~3/4 map</option>
+              <option value="medium">Medium &mdash; ~1/2 map</option>
+              <option value="tight">Tight &mdash; quick brawl</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="field-label">Phase speed</div>
+            <select id="brPhaseSpeed" class="select">
+              <option value="slow">Slow &mdash; long games</option>
+              <option value="normal" selected>Normal</option>
+              <option value="fast">Fast &mdash; quick matches</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="field-label">AI difficulty</div>
+            <select id="brBotDifficulty" class="select">
+              <option value="easy">Easy &mdash; mostly easy bots</option>
+              <option value="mixed" selected>Mixed &mdash; full range</option>
+              <option value="hard">Hard &mdash; tough fight</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="field-label">Mega orbs</div>
+            <select id="brMegaOrbs" class="select">
+              <option value="few">Few &mdash; pure skill</option>
+              <option value="normal" selected>Normal</option>
+              <option value="many">Many &mdash; loot fest</option>
+            </select>
+          </div>
         </div>
         <div style="display:flex;gap:10px;margin-top:6px;">
           <button class="btn btn-ghost btn-sm" id="createRoomBackBtn" style="flex:1;">Back</button>
@@ -1308,7 +1358,22 @@
        ================================================================= -->
   <div id="deathScreen" class="screen">
     <div class="panel">
-      <div class="death-title display">YOU DIED</div>
+      <div class="death-title display" id="deathTitle">YOU DIED</div>
+      <div id="brRankBadge" style="
+        display: none;
+        margin: 0 auto 14px;
+        padding: 8px 16px;
+        background: linear-gradient(135deg, rgba(251,191,36,0.2), rgba(251,113,133,0.15));
+        border: 1px solid rgba(251,191,36,0.5);
+        border-radius: 999px;
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 800;
+        font-size: 14px;
+        letter-spacing: 0.6px;
+        color: #fbbf24;
+        text-align: center;
+        width: fit-content;
+      "></div>
       <div class="death-score">Score <strong id="finalScore">0</strong></div>
       <div class="death-stats">
         <div class="death-stat"><div class="stat-value" id="statTime">0:00</div><div class="stat-label">Time Alive</div></div>
@@ -1339,6 +1404,37 @@
     <canvas id="minimap" width="150" height="150"></canvas>
     <div id="playerCount">Players: 0</div>
     <div id="ping"></div>
+
+    <!-- Leave button — visible in both modes during play -->
+    <button id="leaveBtn" style="
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(10, 12, 28, 0.82);
+      color: #f1f5f9;
+      border: 1px solid rgba(251, 113, 133, 0.4);
+      border-radius: 999px;
+      padding: 8px 16px 8px 12px;
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      transition: all 0.18s ease;
+      z-index: 100;
+    " title="Leave to home">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+        <polyline points="16 17 21 12 16 7"/>
+        <line x1="21" y1="12" x2="9" y2="12"/>
+      </svg>
+      LEAVE
+    </button>
 
     <button id="settingsBtn" title="Settings">&#9881;</button>
     <div id="settingsPanel">
@@ -1457,7 +1553,7 @@
       update();
     })();
   </script>
-  <script src="local-game.js?v=37"></script>
-  <script src="game.js?v=37"></script>
+  <script src="local-game.js?v=38"></script>
+  <script src="game.js?v=38"></script>
 </body>
 </html>

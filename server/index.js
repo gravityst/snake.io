@@ -31,11 +31,11 @@ app.get('/api/rooms', (req, res) => {
 });
 
 app.post('/api/rooms', (req, res) => {
-  const { name, mode, teamSize, creatorName } = req.body;
+  const { name, mode, teamSize, creatorName, royaleConfig } = req.body;
   if (!name || name.length > 24) return res.status(400).json({ error: 'Invalid name' });
   if (roomManager.rooms.size > 50) return res.status(400).json({ error: 'Too many rooms' });
   const room = roomManager.createCustomRoom(
-    name, mode || 'solo', teamSize || 2, creatorName || ''
+    name, mode || 'solo', teamSize || 2, creatorName || '', royaleConfig || null,
   );
   res.json({ id: room.id, name: room.name, code: room.code });
 });

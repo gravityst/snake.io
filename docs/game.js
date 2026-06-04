@@ -1248,7 +1248,50 @@
 
   // --- Input ---
   canvas.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
-  canvas.addEventListener('mousedown', () => setBoosting(true));
+  // Wire the in-game Leave button
+  {
+    const leaveBtn = document.getElementById('leaveBtn');
+    if (leaveBtn) {
+      leaveBtn.addEventListener('click', () => {
+        // Confirm if mid-active-BR (you can't rejoin)
+        const inBR = (localGame && localGame.mode === 'royale') ||
+                     (mpRoyale && (mpRoyale.state === 'active' || mpRoyale.state === 'countdown'));
+        if (inBR && !confirm('Leave the Battle Royale? You cannot rejoin this match.')) return;
+        dismissVictoryToHome();
+      });
+      leaveBtn.addEventListener('mouseenter', () => {
+        leaveBtn.style.background = 'rgba(251, 113, 133, 0.16)';
+        leaveBtn.style.color = '#fb7185';
+        leaveBtn.style.borderColor = 'rgba(251, 113, 133, 0.7)';
+      });
+      leaveBtn.addEventListener('mouseleave', () => {
+        leaveBtn.style.background = 'rgba(10, 12, 28, 0.82)';
+        leaveBtn.style.color = '#f1f5f9';
+        leaveBtn.style.borderColor = 'rgba(251, 113, 133, 0.4)';
+      });
+    }
+  }
+
+  // Dismissal: tap during Victory Royale / match-over returns to home menu.
+  function dismissVictoryToHome() {
+    running = false;
+    localGame = null;
+    localRoyaleStatus = null;
+    mpRoyale = null;
+    clearVictoryConfetti();
+    try { if (ws && ws.readyState <= 1) ws.close(); } catch {}
+    hideAllScreens();
+    document.body.style.cursor = 'default';
+    startScreen.style.display = 'flex';
+    const menuBg = document.getElementById('menuBg');
+    if (menuBg) menuBg.style.display = 'block';
+  }
+  canvas.addEventListener('mousedown', () => {
+    const inVictory = localRoyaleStatus && localRoyaleStatus.matchState === 'victory';
+    const mpEnded = mpRoyale && mpRoyale.state === 'ended';
+    if (inVictory || mpEnded) { dismissVictoryToHome(); return; }
+    setBoosting(true);
+  });
   canvas.addEventListener('mouseup', () => setBoosting(false));
   window.addEventListener('keydown', (e) => { if (e.code==='Space') { e.preventDefault(); setBoosting(true); } });
   window.addEventListener('keyup', (e) => { if (e.code==='Space') setBoosting(false); });
@@ -1272,6 +1315,10 @@
   }, {passive:false});
   canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
+    // BR end / victory: tap returns to home
+    const inVictory = localRoyaleStatus && localRoyaleStatus.matchState === 'victory';
+    const mpEnded = mpRoyale && mpRoyale.state === 'ended';
+    if (inVictory || mpEnded) { dismissVictoryToHome(); return; }
     if (isTouchDevice) {
       for (let i = 0; i < e.changedTouches.length; i++) {
         const t = e.changedTouches[i];
@@ -1352,23 +1399,44 @@
   roomModeSelect.addEventListener('change', () => {
     const m = roomModeSelect.value;
     roomTeamSizeSelect.style.display = m==='team' ? 'block' : 'none';
-    // Also reflect into the wrapping field if the new design uses it
-    const wrap = document.getElementById('teamSizeField');
-    if (wrap) wrap.style.display = m==='team' ? 'block' : 'none';
+    const teamWrap = document.getElementById('teamSizeField');
+    if (teamWrap) teamWrap.style.display = m==='team' ? 'block' : 'none';
+    const brPanel = document.getElementById('brSettingsPanel');
+    if (brPanel) brPanel.style.display = m==='royale' ? 'block' : 'none';
   });
+  function gatherBRConfig() {
+    const sizeMap = { max: 0, large: 5000, medium: 3500, tight: 2000 };
+    const speedMap = { slow: 1.4, normal: 1.0, fast: 0.7 };
+    const orbMap = { few: 4, normal: 8, many: 16 };
+    const startKey = (document.getElementById('brStartSize') || {}).value || 'max';
+    const speedKey = (document.getElementById('brPhaseSpeed') || {}).value || 'normal';
+    const diffKey = (document.getElementById('brBotDifficulty') || {}).value || 'mixed';
+    const orbKey = (document.getElementById('brMegaOrbs') || {}).value || 'normal';
+    return {
+      startRadius: sizeMap[startKey] || 0,  // 0 means "use default max"
+      phaseSpeed: speedMap[speedKey] || 1,
+      botDifficulty: diffKey,
+      megaOrbs: orbMap[orbKey] || 8,
+    };
+  }
   createRoomSubmit.addEventListener('click', async () => {
     const rName = roomNameInput.value.trim() || 'Custom Room';
     const mode = roomModeSelect.value;
     const teamSize = parseInt(roomTeamSizeSelect.value) || 2;
+    const royaleConfig = mode === 'royale' ? gatherBRConfig() : null;
     try {
       const res = await fetch(SERVER_URL + '/api/rooms', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ name: rName, mode, teamSize, creatorName: nameInput.value.trim() }),
+        body: JSON.stringify({
+          name: rName, mode, teamSize,
+          creatorName: nameInput.value.trim(),
+          royaleConfig,
+        }),
       });
       const data = await res.json();
       if (data.id) {
         hideAllScreens();
-        if (mode==='team') showTeamSelector(data.id);
+        if (mode === 'team') showTeamSelector(data.id);
         else startMultiplayerGame(data.id);
       }
     } catch(e) { console.error('Create room failed:', e); }
@@ -1383,12 +1451,26 @@
     const name = nameInput.value.trim() || 'Player';
     localGame = new LocalGame(name, selectedSkin, selectedLocalMode);
     myId = localGame.playerId;
-    localGame.onPlayerDeath((score) => {
+    localGame.onPlayerDeath((score, rank) => {
       saveBestScore(score);
       lastScore = score;
       if (score > peakScore) peakScore = score;
       finalScoreEl.textContent = score;
       populateDeathStats();
+      const titleEl = document.getElementById('deathTitle');
+      const badgeEl = document.getElementById('brRankBadge');
+      if (rank != null) {
+        // BR death: show placement (1 = victory, but victory uses a different path)
+        const total = localGame ? localGame.snakes.length : 20;
+        if (titleEl) titleEl.textContent = 'ELIMINATED';
+        if (badgeEl) {
+          badgeEl.style.display = 'block';
+          badgeEl.textContent = `#${rank} of ${total}`;
+        }
+      } else {
+        if (titleEl) titleEl.textContent = 'YOU DIED';
+        if (badgeEl) badgeEl.style.display = 'none';
+      }
       deathScreen.style.display = 'flex';
       document.body.style.cursor = 'default';
       screenShake = 15;
@@ -1406,20 +1488,6 @@
       const res = await fetch(SERVER_URL + '/api/rooms');
       const rooms = await res.json();
       roomList.innerHTML = '';
-      // Coming-soon teaser for multiplayer Battle Royale
-      const teaser = document.createElement('div');
-      teaser.className = 'room-card';
-      teaser.style.opacity = '0.55';
-      teaser.style.cursor = 'not-allowed';
-      teaser.innerHTML = `
-        <div class="room-left">
-          <span class="mode-badge royale">BATTLE ROYALE</span>
-          <span class="mode-badge" style="background:rgba(251,191,36,0.16);color:#fbbf24;border:1px solid rgba(251,191,36,0.4);">SOON</span>
-          <span class="room-name">Multiplayer Battle Royale</span>
-        </div>
-        <span class="room-players" style="color:#94a3b8;">coming soon</span>
-      `;
-      roomList.appendChild(teaser);
       for (const room of rooms) {
         const card = document.createElement('div');
         card.className = 'room-card' + (room.players >= room.maxPlayers ? ' full' : '');
@@ -1451,9 +1519,17 @@
         }
         if (room.players < room.maxPlayers) {
           card.addEventListener('click', () => {
-            if (roomPollInterval) { clearInterval(roomPollInterval); roomPollInterval=null; }
-            if (room.mode==='team') showTeamSelector(room.id, room.teams);
-            else startMultiplayerGame(room.id);
+            const joinRoom = () => {
+              if (roomPollInterval) { clearInterval(roomPollInterval); roomPollInterval=null; }
+              if (room.mode === 'team') showTeamSelector(room.id, room.teams);
+              else startMultiplayerGame(room.id);
+            };
+            // BR rooms: confirm before joining (no respawn)
+            if (room.mode === 'royale') {
+              showBRJoinConfirm(room, joinRoom);
+            } else {
+              joinRoom();
+            }
           });
         }
         roomList.appendChild(card);
@@ -1493,6 +1569,76 @@
       });
       teamGrid.appendChild(card);
     }
+  }
+
+  // Confirmation overlay before joining a Battle Royale room — players need
+  // to know there's no respawn before they commit.
+  function showBRJoinConfirm(room, onConfirm) {
+    const existing = document.getElementById('brJoinConfirm');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'brJoinConfirm';
+    overlay.style.cssText = `
+      position: fixed; inset: 0; z-index: 9000;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(2, 6, 23, 0.78); backdrop-filter: blur(8px);
+      animation: fadeIn 0.2s ease;
+    `;
+    const stateText = room.royaleState === 'countdown'
+      ? `Starts in ${Math.max(1, Math.ceil((room.royaleCountdownMs || 0) / 1000))}s`
+      : 'Waiting for players';
+    overlay.innerHTML = `
+      <div style="
+        max-width: 440px; width: 90%;
+        background: linear-gradient(180deg, rgba(20,24,48,0.96), rgba(10,12,28,0.96));
+        border: 1px solid rgba(251,113,133,0.4);
+        border-radius: 20px;
+        padding: 28px 26px 22px;
+        box-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04) inset;
+        font-family: 'Inter', sans-serif;
+        color: #f1f5f9;
+        text-align: center;
+      ">
+        <div style="font-size: 11px; letter-spacing: 2px; color: #fb7185; font-weight: 800; margin-bottom: 8px;">
+          BATTLE ROYALE
+        </div>
+        <div style="font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 800; margin-bottom: 16px;">
+          ${room.name}
+        </div>
+        <div style="
+          background: rgba(251,113,133,0.10);
+          border: 1px solid rgba(251,113,133,0.30);
+          border-radius: 14px;
+          padding: 16px 18px;
+          margin-bottom: 18px;
+          text-align: left;
+          font-size: 13px;
+          line-height: 1.55;
+        ">
+          <div style="color:#fb7185;font-weight:800;letter-spacing:0.5px;margin-bottom:6px;">⚠ NO RESPAWN</div>
+          <div style="color:#cbd5e1;">
+            20 snakes drop in. The zone closes in phases. Last one alive wins
+            the <strong style="color:#fbbf24;">Victory Royale</strong>. If you die,
+            the match continues without you.
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;font-size:12px;color:#94a3b8;margin-bottom:18px;">
+          <span>${room.players}/${room.maxPlayers} joined</span>
+          <span>·</span>
+          <span>${stateText}</span>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button id="brJoinCancel" class="btn btn-ghost btn-sm" style="flex:1;">Cancel</button>
+          <button id="brJoinGo" class="btn btn-primary btn-sm" style="flex:2;background:linear-gradient(135deg,#fb7185,#f43f5e);">DROP IN</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#brJoinCancel').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#brJoinGo').addEventListener('click', () => {
+      overlay.remove();
+      onConfirm();
+    });
   }
 
   function startMultiplayerGame(roomId, teamId) {
@@ -2075,13 +2221,28 @@
     if (lastScore > peakScore) peakScore = lastScore;
     populateDeathStats();
     screenShake=15;
+    // Multiplayer BR: show ELIMINATED with rank, hide respawn (no rejoin)
+    const titleEl = document.getElementById('deathTitle');
+    const badgeEl = document.getElementById('brRankBadge');
+    const respawnEl = document.getElementById('respawnBtn');
+    if (mpRoyale && (mpRoyale.state === 'active' || mpRoyale.state === 'ended')) {
+      if (titleEl) titleEl.textContent = 'ELIMINATED';
+      if (badgeEl) {
+        const alive = mpRoyale.aliveCount || 0;
+        badgeEl.style.display = 'block';
+        badgeEl.textContent = `#${alive + 1} of 20`;
+      }
+      if (respawnEl) respawnEl.style.display = 'none';
+    } else {
+      if (titleEl) titleEl.textContent = 'YOU DIED';
+      if (badgeEl) badgeEl.style.display = 'none';
+      if (respawnEl) respawnEl.style.display = '';
+    }
     myId=null;
     disconnect(); // ALWAYS disconnect immediately — no phantom reconnects
-    // Death zoom / spectate (client-side camera pan only, no server needed)
     if (lastKillerPos) {
       spectateTarget = { x: lastKillerPos.x, y: lastKillerPos.y };
-      spectateTimer = 0.8; // quick death cam, not 3s of frozen world
-      // running stays true so camera panning works in frame loop
+      spectateTimer = 0.8;
     } else {
       deathScreen.style.display='flex';
       document.body.style.cursor='default';
@@ -2231,6 +2392,79 @@
     if (royaleBanners.length > 4) royaleBanners.shift();
   }
 
+  // Victory Royale celebration — confetti rain + golden crown + glowing text.
+  let victoryConfetti = [];
+  function spawnVictoryConfetti() {
+    if (victoryConfetti.length > 0) return;
+    const palette = ['#fbbf24', '#5eead4', '#fb7185', '#7dd3fc', '#a3e635', '#f0abfc'];
+    for (let i = 0; i < 160; i++) {
+      victoryConfetti.push({
+        x: Math.random() * canvas.width,
+        y: -30 - Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 160,
+        vy: 120 + Math.random() * 220,
+        rot: Math.random() * Math.PI * 2,
+        vrot: (Math.random() - 0.5) * 10,
+        size: 7 + Math.random() * 10,
+        color: palette[Math.floor(Math.random() * palette.length)],
+      });
+    }
+  }
+  function clearVictoryConfetti() { victoryConfetti = []; }
+  function drawVictoryRoyale(dt, score) {
+    const W = canvas.width, H = canvas.height;
+    spawnVictoryConfetti();
+    // Dim backdrop with a warm gold tint
+    ctx.save();
+    const bg = ctx.createRadialGradient(W/2, H/2, 60, W/2, H/2, Math.max(W, H));
+    bg.addColorStop(0, 'rgba(50,30,5,0.55)');
+    bg.addColorStop(1, 'rgba(2,4,16,0.92)');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    // Confetti
+    for (const c of victoryConfetti) {
+      c.x += c.vx * dt;
+      c.y += c.vy * dt;
+      c.vy += 240 * dt;
+      c.rot += c.vrot * dt;
+      if (c.y > H + 40) { c.y = -40; c.vy = 120 + Math.random() * 220; }
+      ctx.save();
+      ctx.translate(c.x, c.y);
+      ctx.rotate(c.rot);
+      ctx.fillStyle = c.color;
+      ctx.fillRect(-c.size/2, -c.size/4, c.size, c.size/2);
+      ctx.restore();
+    }
+    // Golden crown emoji at top
+    ctx.font = '128px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const crownY = H/2 - 150 + Math.sin(animTime * 1.6) * 6;
+    ctx.fillText('👑', W/2, crownY);
+    // Title — pulsing gold
+    const titlePulse = 1 + 0.04 * Math.sin(animTime * 4);
+    ctx.font = `800 ${Math.round(72 * titlePulse)}px 'Space Grotesk', 'Inter', sans-serif`;
+    ctx.shadowColor = 'rgba(251,191,36,0.85)';
+    ctx.shadowBlur = 50;
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillText('VICTORY ROYALE', W/2, H/2 - 16);
+    ctx.shadowBlur = 0;
+    // Subtitle
+    ctx.font = "600 18px 'Inter', sans-serif";
+    ctx.fillStyle = '#f1f5f9';
+    ctx.fillText('Last snake standing', W/2, H/2 + 36);
+    // Score
+    ctx.font = "800 32px 'Space Grotesk', sans-serif";
+    ctx.fillStyle = '#5eead4';
+    ctx.fillText('SCORE ' + (score || 0), W/2, H/2 + 88);
+    // Hint
+    ctx.font = "500 12px 'Inter', sans-serif";
+    ctx.fillStyle = 'rgba(148,163,184,0.85)';
+    ctx.fillText('Tap anywhere to return home', W/2, H/2 + 130);
+    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
+  }
+
   function drawLocalRoyaleHUD(dt) {
     const st = localRoyaleStatus;
     if (!st) return;
@@ -2245,6 +2479,40 @@
           pushRoyaleBanner('ZONE LOCKED', `Hold radius: ${Math.round(ev.radius)}`, '#5eead4');
         }
       }
+    }
+
+    // Pre-match countdown overlay — big 3..2..1..GO!
+    if (st.matchState === 'countdown') {
+      ctx.save();
+      ctx.fillStyle = 'rgba(2,6,23,0.55)';
+      ctx.fillRect(0, 0, W, H);
+      const c = Math.ceil(st.matchCountdown);
+      const isGo = c <= 0;
+      const txt = isGo ? 'GO!' : String(c);
+      const pulse = isGo ? 1 : 1 + 0.2 * (1 - (st.matchCountdown % 1));
+      ctx.font = `800 ${Math.round(180 * pulse)}px 'Space Grotesk', 'Inter', sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = isGo ? 'rgba(94,234,212,0.9)' : 'rgba(251,113,133,0.85)';
+      ctx.shadowBlur = 60;
+      ctx.fillStyle = isGo ? '#5eead4' : '#fb7185';
+      ctx.fillText(txt, W/2, H/2);
+      ctx.shadowBlur = 0;
+      ctx.font = "700 14px 'Inter', sans-serif";
+      ctx.fillStyle = 'rgba(241,245,249,0.85)';
+      ctx.fillText('BATTLE ROYALE', W/2, H/2 - 130);
+      ctx.font = "500 12px 'Inter', sans-serif";
+      ctx.fillStyle = 'rgba(148,163,184,0.9)';
+      ctx.fillText('20 snakes. No respawn. Last one alive wins.', W/2, H/2 + 130);
+      ctx.textBaseline = 'alphabetic';
+      ctx.restore();
+      return; // skip the rest of the HUD during countdown
+    }
+
+    // Victory Royale celebration
+    if (st.matchState === 'victory' || st.victoryFlag) {
+      drawVictoryRoyale(dt, st.playerScore);
+      return;
     }
 
     // Phase status panel — circular time-progress ring on the left, panel-card
@@ -2410,26 +2678,45 @@
     }
     if (!mpRoyale) return;
     const W = canvas.width, H = canvas.height;
-    // --- Countdown overlay (during lobby/countdown) ---
+    // --- Lobby / countdown — full-screen waiting room ---
     if (mpRoyale.state === 'countdown' || mpRoyale.state === 'lobby') {
       const secs = Math.ceil((mpRoyale.countdownMs || 0) / 1000);
       ctx.save();
-      // Top center pill
-      ctx.font = "bold 14px 'Space Grotesk', 'Inter', sans-serif";
+      // Dim backdrop
+      ctx.fillStyle = 'rgba(2,6,23,0.62)';
+      ctx.fillRect(0, 0, W, H);
+      // Title
       ctx.textAlign = 'center';
-      const label = mpRoyale.state === 'countdown' ? 'BATTLE ROYALE STARTS IN' : 'WAITING FOR PLAYERS';
-      const sub = mpRoyale.state === 'countdown' ? (secs + 's') : '— join window open —';
-      ctx.fillStyle = 'rgba(10,12,28,0.85)';
-      ctx.strokeStyle = secs <= 5 ? 'rgba(251,113,133,0.9)' : 'rgba(94,234,212,0.7)';
-      const pillW = 280, pillH = 64, px = W/2 - pillW/2, py = 16;
-      roundRect(ctx, px, py, pillW, pillH, 14);
-      ctx.fill(); ctx.lineWidth = 2; ctx.stroke();
-      ctx.fillStyle = 'rgba(148,163,184,0.9)';
-      ctx.font = "700 11px 'Inter', sans-serif";
-      ctx.fillText(label, W/2, py + 20);
-      ctx.font = "800 26px 'Space Grotesk', sans-serif";
-      ctx.fillStyle = secs <= 5 ? '#fb7185' : '#5eead4';
-      ctx.fillText(sub, W/2, py + 50);
+      ctx.textBaseline = 'middle';
+      ctx.font = "800 12px 'Inter', sans-serif";
+      ctx.fillStyle = 'rgba(251,113,133,0.9)';
+      ctx.fillText('BATTLE ROYALE', W/2, H/2 - 180);
+      // Big countdown number or "WAITING"
+      if (mpRoyale.state === 'countdown') {
+        const isLow = secs <= 5;
+        const pulse = 1 + 0.08 * Math.sin(animTime * 5);
+        ctx.font = `800 ${Math.round(160 * pulse)}px 'Space Grotesk', 'Inter', sans-serif`;
+        ctx.shadowColor = isLow ? 'rgba(251,113,133,0.9)' : 'rgba(94,234,212,0.85)';
+        ctx.shadowBlur = 50;
+        ctx.fillStyle = isLow ? '#fb7185' : '#5eead4';
+        ctx.fillText(secs + 's', W/2, H/2 - 30);
+        ctx.shadowBlur = 0;
+        ctx.font = "700 14px 'Inter', sans-serif";
+        ctx.fillStyle = '#f1f5f9';
+        ctx.fillText('UNTIL DROP', W/2, H/2 + 70);
+      } else {
+        ctx.font = "800 56px 'Space Grotesk', sans-serif";
+        ctx.fillStyle = '#5eead4';
+        ctx.fillText('WAITING FOR DROP', W/2, H/2 - 30);
+        ctx.font = "600 14px 'Inter', sans-serif";
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fillText('Lobby is open — more players can still join', W/2, H/2 + 30);
+      }
+      // Footer info
+      ctx.font = "600 12px 'Inter', sans-serif";
+      ctx.fillStyle = 'rgba(148,163,184,0.85)';
+      ctx.fillText('20 SNAKES · NO RESPAWN · LAST ALIVE WINS', W/2, H/2 + 130);
+      ctx.textBaseline = 'alphabetic';
       ctx.restore();
     }
     // --- Damage vignette while outside the zone (active phase only) ---
@@ -2476,26 +2763,29 @@
     }
     // --- Winner screen ---
     if (mpRoyale.state === 'ended') {
-      const endSecs = Math.ceil((mpRoyale.endMs || 0) / 1000);
-      ctx.save();
-      ctx.fillStyle = 'rgba(6,8,26,0.7)';
-      ctx.fillRect(0, 0, W, H);
-      ctx.textAlign = 'center';
       const won = mpRoyale.winnerId === myId;
-      ctx.font = "800 56px 'Space Grotesk', sans-serif";
-      ctx.fillStyle = won ? '#5eead4' : '#a78bfa';
-      ctx.shadowColor = won ? 'rgba(94,234,212,0.6)' : 'rgba(167,139,250,0.5)';
-      ctx.shadowBlur = 30;
-      ctx.fillText(won ? 'VICTORY' : 'MATCH OVER', W/2, H/2 - 30);
-      ctx.shadowBlur = 0;
-      ctx.font = "600 18px 'Inter', sans-serif";
-      ctx.fillStyle = '#f1f5f9';
-      const sub = mpRoyale.winName ? `Winner: ${mpRoyale.winName}` : 'No survivors';
-      ctx.fillText(sub, W/2, H/2 + 6);
-      ctx.font = "500 13px 'Inter', sans-serif";
-      ctx.fillStyle = '#94a3b8';
-      ctx.fillText(`Next round in ${endSecs}s`, W/2, H/2 + 34);
-      ctx.restore();
+      if (won) {
+        const me = snakes.find(s => s.id === myId);
+        drawVictoryRoyale(dt, me ? me.score : 0);
+      } else {
+        ctx.save();
+        ctx.fillStyle = 'rgba(6,8,26,0.78)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = "800 56px 'Space Grotesk', sans-serif";
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('MATCH OVER', W/2, H/2 - 30);
+        ctx.font = "600 18px 'Inter', sans-serif";
+        ctx.fillStyle = '#f1f5f9';
+        const sub = mpRoyale.winName ? `${mpRoyale.winName} wins the Royale` : 'No survivors';
+        ctx.fillText(sub, W/2, H/2 + 20);
+        ctx.font = "500 13px 'Inter', sans-serif";
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('Tap anywhere to return home', W/2, H/2 + 60);
+        ctx.textBaseline = 'alphabetic';
+        ctx.restore();
+      }
     }
   }
 
