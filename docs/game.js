@@ -2070,27 +2070,24 @@
       }
     }
 
-    // Phase pill (top center)
+    // Slim phase pill (top center) — one line, low profile
     ctx.save();
     const phaseLabel = st.state === 'done'
       ? 'FINAL ZONE'
       : st.state === 'shrink'
-        ? `ZONE CLOSING · ${Math.ceil(st.timeRemaining)}s`
-        : `PHASE ${st.phaseIdx + 1}/${st.totalPhases} · ${Math.ceil(st.timeRemaining)}s`;
-    const tw = Math.max(220, ctx.measureText(phaseLabel).width + 80);
-    const pillH = 38;
-    ctx.fillStyle = 'rgba(10,12,28,0.85)';
-    ctx.strokeStyle = st.state === 'shrink' ? 'rgba(251,113,133,0.95)' : 'rgba(94,234,212,0.7)';
-    roundRect(ctx, W/2 - tw/2, 14, tw, pillH, 14);
-    ctx.fill(); ctx.lineWidth = 2; ctx.stroke();
-    ctx.font = "800 14px 'Space Grotesk', 'Inter', sans-serif";
+        ? `CLOSING ${Math.ceil(st.timeRemaining)}s`
+        : `P${st.phaseIdx + 1}/${st.totalPhases} · ${Math.ceil(st.timeRemaining)}s`;
+    const fullText = `${phaseLabel}  ·  ${st.alive} alive`;
+    ctx.font = "700 11px 'Inter', 'Space Grotesk', sans-serif";
+    const tw = Math.max(150, ctx.measureText(fullText).width + 28);
+    const pillH = 22;
+    ctx.fillStyle = 'rgba(10,12,28,0.78)';
+    ctx.strokeStyle = st.state === 'shrink' ? 'rgba(251,113,133,0.7)' : 'rgba(94,234,212,0.45)';
+    roundRect(ctx, W/2 - tw/2, 10, tw, pillH, 11);
+    ctx.fill(); ctx.lineWidth = 1; ctx.stroke();
     ctx.textAlign = 'center';
     ctx.fillStyle = st.state === 'shrink' ? '#fb7185' : '#5eead4';
-    ctx.fillText(phaseLabel, W/2, 38);
-    // Alive counter under it
-    ctx.font = "600 11px 'Inter', sans-serif";
-    ctx.fillStyle = 'rgba(148,163,184,0.85)';
-    ctx.fillText(`${st.alive} ALIVE`, W/2, 58);
+    ctx.fillText(fullText, W/2, 25);
     ctx.restore();
 
     // Banner notifications stack on the right
@@ -2427,35 +2424,44 @@
     const midX=canvas.width/2,midY=canvas.height/2;
     const score = snake.score;
     ctx.shadowBlur=0;
-    for(let i=segs.length-1;i>=1;i--){
-      const seg=segs[i],sx=seg.x-cx+midX,sy=seg.y-cy+midY;
-      if(sx<midX-halfW||sx>midX+halfW||sy<midY-halfH||sy>midY+halfH) continue;
-      const tailT=i/segs.length;
-      let r=dotR*(1-tailT*0.35);
-      // Evolution: score>=2000 body dots pulse gently (+-5%)
-      if (score >= 2000) r *= 1 + 0.05 * Math.sin(animTime * 4 + i * 0.3);
-      // Mid-point dot — packs the body so it reads as a continuous tube
-      // instead of a string of pearls. Drawn first so the main segment paints
-      // over its center for crisper edges.
-      const next = segs[i-1];
-      if (next) {
-        const mx = (seg.x + next.x) * 0.5 - cx + midX;
-        const my = (seg.y + next.y) * 0.5 - cy + midY;
-        const midColor = getSegColor(snake, i - 1);
-        ctx.fillStyle = midColor;
-        ctx.globalAlpha = 0.95;
-        const mr = r * 1.02;
-        ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fill();
-      }
-      ctx.fillStyle=getSegColor(snake,i);ctx.globalAlpha=0.95;ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.fill();
-      // Evolution: score>=500 white rim on body dots
-      if (score >= 500) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.stroke();
-      }
+
+    // Build screen-space segment positions
+    const ss = new Array(segs.length);
+    for (let i = 0; i < segs.length; i++) {
+      ss[i] = { x: segs[i].x - cx + midX, y: segs[i].y - cy + midY };
     }
-    ctx.globalAlpha=1;
+    // Solid body — thick stroked polyline gives a continuous slither.io tube
+    // (replaces the old "string of pearls" per-segment circle render).
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    // Optional white rim outline for evolved snakes — drawn first, wider
+    if (score >= 500) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+      ctx.lineWidth = dotR * 2.25;
+      ctx.beginPath();
+      ctx.moveTo(ss[ss.length-1].x, ss[ss.length-1].y);
+      for (let i = ss.length - 2; i >= 0; i--) ctx.lineTo(ss[i].x, ss[i].y);
+      ctx.stroke();
+    }
+    // Per-segment colored band so multi-color skins still pattern correctly
+    ctx.globalAlpha = 0.98;
+    for (let i = ss.length - 1; i >= 1; i--) {
+      const a = ss[i], b = ss[i-1];
+      // Cull off-screen segments
+      if (Math.max(a.x, b.x) < midX - halfW || Math.min(a.x, b.x) > midX + halfW ||
+          Math.max(a.y, b.y) < midY - halfH || Math.min(a.y, b.y) > midY + halfH) continue;
+      const tailT = i / ss.length;
+      let w = dotR * 2 * (1 - tailT * 0.22);
+      // Evolution: score>=2000 body pulses gently
+      if (score >= 2000) w *= 1 + 0.04 * Math.sin(animTime * 4 + i * 0.3);
+      ctx.lineWidth = w;
+      ctx.strokeStyle = getSegColor(snake, i);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
     const head=segs[0],hx=head.x-cx+canvas.width/2,hy=head.y-cy+canvas.height/2;
     const angle=Math.atan2(head.y-segs[1].y,head.x-segs[1].x);
     // Evolution: score>=200 faint outer glow ring around head
@@ -2688,6 +2694,37 @@
     minimapCtx.fillStyle='rgba(0,10,20,0.6)';minimapCtx.fillRect(0,0,w,h);
     minimapCtx.strokeStyle='rgba(0,255,255,0.3)';minimapCtx.lineWidth=1;minimapCtx.strokeRect(0,0,w,h);
     const scale=w/MAP_SIZE,ox=w/2,oy=h/2;
+    // Battle Royale safe zone — red danger fill + safe-zone ring + target preview
+    if (localGame && localGame.mode === 'royale') {
+      const zcx = (localGame.safeCenterX || 0) * scale + ox;
+      const zcy = (localGame.safeCenterY || 0) * scale + oy;
+      const zr = localGame.safeRadius * scale;
+      const zrTarget = localGame.safeTargetRadius * scale;
+      // Danger fill outside the safe zone (within minimap bounds)
+      minimapCtx.fillStyle = 'rgba(220, 40, 40, 0.18)';
+      minimapCtx.beginPath();
+      minimapCtx.rect(0, 0, w, h);
+      minimapCtx.arc(zcx, zcy, zr, 0, Math.PI * 2, true);
+      minimapCtx.fill('evenodd');
+      // Safe boundary
+      const closing = localGame.royalePhaseState === 'shrink';
+      minimapCtx.strokeStyle = closing ? 'rgba(255,110,110,0.95)' : 'rgba(255,180,80,0.85)';
+      minimapCtx.lineWidth = 1.5;
+      minimapCtx.setLineDash([3, 3]);
+      minimapCtx.beginPath();
+      minimapCtx.arc(zcx, zcy, zr, 0, Math.PI * 2);
+      minimapCtx.stroke();
+      // Target zone preview during hold
+      if (zrTarget < zr - 2) {
+        minimapCtx.strokeStyle = 'rgba(94,234,212,0.7)';
+        minimapCtx.lineWidth = 1;
+        minimapCtx.setLineDash([2, 3]);
+        minimapCtx.beginPath();
+        minimapCtx.arc(zcx, zcy, zrTarget, 0, Math.PI * 2);
+        minimapCtx.stroke();
+      }
+      minimapCtx.setLineDash([]);
+    }
     const megaPulse=0.7+0.3*Math.sin(animTime*4);
     for(const m of megaOrbs){minimapCtx.fillStyle=COLORS[m.color];minimapCtx.globalAlpha=megaPulse;minimapCtx.beginPath();minimapCtx.arc(m.x*scale+ox,m.y*scale+oy,3,0,Math.PI*2);minimapCtx.fill();}
     minimapCtx.globalAlpha=1;

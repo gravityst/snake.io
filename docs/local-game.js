@@ -82,6 +82,40 @@ class LocalGame {
     return { x: Math.cos(a) * r, y: Math.sin(a) * r };
   }
 
+  // Pick a clear spawn point: inside the safe zone (or map) AND away from
+  // any existing snake's head/body. Retries up to `attempts` times before
+  // falling back to whatever _zoned returned.
+  _safeSpawn(power = 1.5, attempts = 30) {
+    const inRoyale = this.mode === 'royale';
+    const cx = inRoyale ? this.safeCenterX : 0;
+    const cy = inRoyale ? this.safeCenterY : 0;
+    const maxR = inRoyale
+      ? Math.max(150, this.safeRadius - 250)
+      : this.MAP_SIZE / 2 - 200;
+    const minClearance = 220;
+    for (let k = 0; k < attempts; k++) {
+      const r = Math.pow(Math.random(), power) * maxR;
+      const a = Math.random() * Math.PI * 2;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r;
+      let clear = true;
+      for (const s of this.snakes) {
+        if (!s.alive || s.segments.length === 0) continue;
+        const checkLen = Math.min(s.segments.length, 40);
+        for (let j = 0; j < checkLen; j++) {
+          const dx = s.segments[j].x - x, dy = s.segments[j].y - y;
+          if (dx*dx + dy*dy < minClearance*minClearance) { clear = false; break; }
+        }
+        if (!clear) break;
+      }
+      if (clear) return { x, y };
+    }
+    // Fallback — at least clip to safe zone in royale mode
+    const r = Math.pow(Math.random(), power) * maxR;
+    const a = Math.random() * Math.PI * 2;
+    return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r };
+  }
+
   _thickness(snake) { return 1 + Math.sqrt(snake.score) / 45 + snake.score / 8000; }
 
   _randomSkill() {
@@ -94,7 +128,7 @@ class LocalGame {
   _createSnake(name, isBot, skinIdx, skill) {
     const id = this.nextId++;
     const angle = Math.random() * Math.PI * 2;
-    const pos = isBot ? this._zoned(1.2) : this._zoned(2.5);
+    const pos = this._safeSpawn(isBot ? 1.2 : 2.5);
     const segments = [];
     for (let i = 0; i < this.INITIAL_LENGTH; i++) {
       segments.push({ x: pos.x - Math.cos(angle)*i*this.SEGMENT_SPACING, y: pos.y - Math.sin(angle)*i*this.SEGMENT_SPACING });
@@ -338,7 +372,7 @@ class LocalGame {
 
   _respawnBot(snake) {
     const angle = Math.random()*Math.PI*2;
-    const pos = this._zoned(1.2);
+    const pos = this._safeSpawn(1.2);
     snake.segments = [];
     for (let i=0;i<this.INITIAL_LENGTH;i++) {
       snake.segments.push({x:pos.x-Math.cos(angle)*i*this.SEGMENT_SPACING,y:pos.y-Math.sin(angle)*i*this.SEGMENT_SPACING});
