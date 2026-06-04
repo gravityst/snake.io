@@ -1075,44 +1075,50 @@
   let royaleBanners = []; // { text, sub, color, life, total }
 
   // --- Parallax starfield ---
+  // Tints: white, soft teal, cool blue (no purple/pink).
+  const STAR_TINTS = ['#ffffff', '#ffffff', '#ffffff', '#7dd3fc', '#5eead4', '#cffafe'];
   const stars = [];
-  for (let i = 0; i < 320; i++) {
+  for (let i = 0; i < 280; i++) {
     stars.push({
       x: (Math.random() - 0.5) * MAP_SIZE * 1.5,
       y: (Math.random() - 0.5) * MAP_SIZE * 1.5,
       size: 0.4 + Math.random() * 1.8,
-      brightness: 0.25 + Math.random() * 0.65,
+      brightness: 0.22 + Math.random() * 0.55,
       twinkleSpeed: 0.6 + Math.random() * 1.4,
       twinklePhase: Math.random() * Math.PI * 2,
-      tint: Math.random() < 0.15 ? '#a78bfa' : Math.random() < 0.25 ? '#5eead4' : '#ffffff',
+      tint: STAR_TINTS[Math.floor(Math.random() * STAR_TINTS.length)],
     });
   }
-  // Nebula cloud blobs — atmospheric color washes drifting in parallax
-  const NEBULA_COLORS = ['#1e1b4b', '#312e81', '#0e7490', '#5b21b6', '#0c4a6e', '#581c87'];
+  // Nebula cloud blobs — deep-blue / teal palette only, low alpha so they
+  // sit subtly behind the play area instead of competing with it.
+  const NEBULA_COLORS = ['#0c4a6e', '#164e63', '#022c43', '#0f172a', '#155e75', '#0e7490'];
   const nebulae = [];
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 7; i++) {
     nebulae.push({
       x: (Math.random() - 0.5) * MAP_SIZE * 1.4,
       y: (Math.random() - 0.5) * MAP_SIZE * 1.4,
-      radius: 600 + Math.random() * 900,
+      radius: 700 + Math.random() * 900,
       color: NEBULA_COLORS[i % NEBULA_COLORS.length],
-      alpha: 0.18 + Math.random() * 0.18,
-      driftAngle: Math.random() * Math.PI * 2,
+      alpha: 0.10 + Math.random() * 0.10,
     });
   }
-  // Pre-rendered nebula sprite — single radial-gradient sprite scaled per cloud
-  const nebulaSprite = (() => {
-    const s = document.createElement('canvas');
-    s.width = s.height = 256;
-    const sx = s.getContext('2d');
-    const g = sx.createRadialGradient(128, 128, 10, 128, 128, 128);
-    g.addColorStop(0, 'rgba(255,255,255,0.85)');
-    g.addColorStop(0.4, 'rgba(255,255,255,0.30)');
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    sx.fillStyle = g;
-    sx.fillRect(0, 0, 256, 256);
-    return s;
-  })();
+  // Cosmic dust — faint drifting particles that replace the grid as the
+  // "you are moving through space" visual cue. Each particle moves with
+  // its own slow drift vector so the field never sits still.
+  const dust = [];
+  for (let i = 0; i < 180; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const speed = 4 + Math.random() * 14;
+    dust.push({
+      x: (Math.random() - 0.5) * MAP_SIZE * 1.2,
+      y: (Math.random() - 0.5) * MAP_SIZE * 1.2,
+      vx: Math.cos(a) * speed,
+      vy: Math.sin(a) * speed,
+      size: 0.6 + Math.random() * 1.2,
+      alpha: 0.12 + Math.random() * 0.18,
+      tint: Math.random() < 0.4 ? '#5eead4' : '#ffffff',
+    });
+  }
 
   // Food orb sprite cache — pre-rendered glossy orbs keyed by (color, tier, size)
   // so we don't re-run createRadialGradient × N every frame.
@@ -1122,7 +1128,7 @@
     let entry = foodSpriteCache.get(key);
     if (entry) return entry;
     const r = sizeKey;
-    const pad = Math.ceil(r * 1.4);
+    const pad = Math.ceil(r * 1.5);
     const size = (r + pad) * 2;
     const off = document.createElement('canvas');
     off.width = off.height = size;
@@ -1130,26 +1136,58 @@
     const cx = size / 2, cy = size / 2;
     const color = COLORS[colorIdx] || COLORS[0];
     const colorFull = hexFull(color);
-    // Soft outer glow — modest, app-aligned
+    const colorLight = lighten(colorFull, 0.45);
+    const colorDark = darken(colorFull, 0.40);
+
+    // Outer halo glow — bigger and softer for higher tiers
     const haloR = r + pad;
-    const haloA = tier >= 4 ? 0.34 : tier >= 2 ? 0.22 : 0.14;
-    const halo = fc.createRadialGradient(cx, cy, r * 0.5, cx, cy, haloR);
+    const haloA = tier >= 6 ? 0.42 : tier >= 4 ? 0.32 : tier >= 2 ? 0.22 : 0.14;
+    const halo = fc.createRadialGradient(cx, cy, r * 0.4, cx, cy, haloR);
     halo.addColorStop(0, colorFull + Math.floor(haloA * 255).toString(16).padStart(2, '0'));
+    halo.addColorStop(0.55, colorFull + Math.floor(haloA * 0.4 * 255).toString(16).padStart(2, '0'));
     halo.addColorStop(1, colorFull + '00');
     fc.fillStyle = halo;
     fc.beginPath(); fc.arc(cx, cy, haloR, 0, Math.PI * 2); fc.fill();
-    // Core orb — soft gradient (no harsh white center)
-    const core = fc.createRadialGradient(cx - r * 0.32, cy - r * 0.32, r * 0.1, cx, cy, r);
-    core.addColorStop(0, lighten(colorFull, 0.55));
-    core.addColorStop(0.6, colorFull);
-    core.addColorStop(1, darken(colorFull, 0.25));
+
+    // Drop shadow under the orb (depth)
+    const shadow = fc.createRadialGradient(cx, cy + r * 0.15, r * 0.4, cx, cy + r * 0.15, r * 1.05);
+    shadow.addColorStop(0, 'rgba(0,0,0,0.32)');
+    shadow.addColorStop(1, 'rgba(0,0,0,0)');
+    fc.fillStyle = shadow;
+    fc.beginPath(); fc.arc(cx, cy + r * 0.15, r * 1.05, 0, Math.PI * 2); fc.fill();
+
+    // Core orb — clean radial gradient (light top-left → mid color → dark rim)
+    const core = fc.createRadialGradient(cx - r * 0.3, cy - r * 0.32, r * 0.08, cx + r * 0.1, cy + r * 0.15, r * 1.05);
+    core.addColorStop(0, colorLight);
+    core.addColorStop(0.45, colorFull);
+    core.addColorStop(1, colorDark);
     fc.fillStyle = core;
     fc.beginPath(); fc.arc(cx, cy, r, 0, Math.PI * 2); fc.fill();
-    // Subtle highlight (top-left)
-    fc.fillStyle = 'rgba(255,255,255,0.50)';
+
+    // Thin top rim highlight — like light catching a glass orb
+    fc.strokeStyle = 'rgba(255,255,255,0.55)';
+    fc.lineWidth = Math.max(0.6, r * 0.08);
     fc.beginPath();
-    fc.ellipse(cx - r * 0.32, cy - r * 0.36, r * 0.30, r * 0.20, -Math.PI / 4, 0, Math.PI * 2);
+    fc.arc(cx, cy, r - fc.lineWidth * 0.5, -Math.PI * 0.78, -Math.PI * 0.18);
+    fc.stroke();
+
+    // Soft top-left specular highlight (small, soft, not harsh)
+    const hl = fc.createRadialGradient(cx - r * 0.35, cy - r * 0.38, 0, cx - r * 0.35, cy - r * 0.38, r * 0.45);
+    hl.addColorStop(0, 'rgba(255,255,255,0.75)');
+    hl.addColorStop(0.5, 'rgba(255,255,255,0.20)');
+    hl.addColorStop(1, 'rgba(255,255,255,0)');
+    fc.fillStyle = hl;
+    fc.beginPath();
+    fc.ellipse(cx - r * 0.32, cy - r * 0.36, r * 0.42, r * 0.32, -Math.PI / 4, 0, Math.PI * 2);
     fc.fill();
+
+    // Outer crisp ring — defines the orb's silhouette against the bg
+    fc.strokeStyle = colorDark + 'cc';
+    fc.lineWidth = Math.max(0.5, r * 0.06);
+    fc.beginPath();
+    fc.arc(cx, cy, r, 0, Math.PI * 2);
+    fc.stroke();
+
     entry = { canvas: off, half: size / 2 };
     foodSpriteCache.set(key, entry);
     return entry;
@@ -1198,7 +1236,8 @@
   const snakeNameCache = new Map(); // id → name, persists after death
 
   // --- Settings (persisted in localStorage) ---
-  let showGrid = localStorage.getItem('setting_showGrid') !== 'false';
+  // Default OFF — cosmic dust + nebulae read better than the grid in BR
+  let showGrid = localStorage.getItem('setting_showGrid') === 'true';
   let showParticles = localStorage.getItem('setting_showParticles') !== 'false';
   let showShake = localStorage.getItem('setting_showShake') !== 'false';
 
@@ -2731,10 +2770,8 @@
   function drawStars(cx, cy) {
     const W = canvas.width, H = canvas.height;
     const midX = W / 2, midY = H / 2;
-    // Nebula clouds — soft tinted radial gradients drifting in parallax,
-    // additive blend so they "glow" rather than block out stars behind them.
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
+    // Nebula clouds — subtle deep-blue/teal washes (no additive — additive
+    // made them feel "vibrant"; normal blend keeps them moody).
     for (const n of nebulae) {
       const nx = n.x * 0.15 - cx * 0.15 + midX;
       const ny = n.y * 0.15 - cy * 0.15 + midY;
@@ -2749,7 +2786,27 @@
       ctx.arc(nx, ny, nr, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.restore();
+    // Cosmic dust — drifts independently, parallax 0.55 so it feels closer
+    // than the nebulae. Each frame advance position; wrap around map bounds.
+    const dt = Math.min(animTime - (drawStars._t || animTime), 0.05);
+    drawStars._t = animTime;
+    const halfMap = MAP_SIZE * 0.6;
+    for (const d of dust) {
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      if (d.x >  halfMap) d.x -= halfMap * 2;
+      if (d.x < -halfMap) d.x += halfMap * 2;
+      if (d.y >  halfMap) d.y -= halfMap * 2;
+      if (d.y < -halfMap) d.y += halfMap * 2;
+      const sx = d.x * 0.55 - cx * 0.55 + midX;
+      const sy = d.y * 0.55 - cy * 0.55 + midY;
+      if (sx < -5 || sx > W + 5 || sy < -5 || sy > H + 5) continue;
+      ctx.globalAlpha = d.alpha;
+      ctx.fillStyle = d.tint;
+      ctx.beginPath();
+      ctx.arc(sx, sy, d.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
     // Stars — gentle twinkle per-star
     for (const star of stars) {
       const sx = star.x * 0.3 - cx * 0.3 + midX;
