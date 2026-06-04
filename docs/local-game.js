@@ -17,15 +17,17 @@ class LocalGame {
     this.BOT_COUNT = 25;
     this.MEGA_ORB_COUNT = 12;
     this.mode = mode;
-    this.safeRadius = this.MAP_SIZE / 2 - 250;
-    this.shrinkDelay = 10;
-    this.shrinkRate = 22;
+    // Battle Royale safe zone — tuned so the player can SEE the ring closing
+    // in within seconds, not minutes. Match length ~90s end-to-end.
+    this.safeRadius = mode === 'royale' ? 4500 : this.MAP_SIZE / 2 - 250;
+    this.shrinkDelay = mode === 'royale' ? 3 : 10;   // brief warm-up
+    this.shrinkRate = mode === 'royale' ? 45 : 22;   // ~90s to fully close
     this.shrinkPulse = 0;
-    // Battle Royale: zone center drifts smoothly toward the player so the
-    // arena slowly chases you. Tunable speed in world-units/sec.
+    this.safeMin = mode === 'royale' ? 350 : 600;
+    // Zone center drifts smoothly toward the player (world-units/sec)
     this.safeCenterX = 0;
     this.safeCenterY = 0;
-    this.zoneDriftSpeed = 38;
+    this.zoneDriftSpeed = 50;
 
     this.snakes = [];
     this.food = [];
@@ -165,7 +167,7 @@ class LocalGame {
       }
       this.shrinkDelay = Math.max(0, this.shrinkDelay - dt);
       if (this.shrinkDelay <= 0) {
-        this.safeRadius = Math.max(450, this.safeRadius - this.shrinkRate * dt);
+        this.safeRadius = Math.max(this.safeMin, this.safeRadius - this.shrinkRate * dt);
       }
       this.shrinkPulse = 0; // no bobbing
     }
