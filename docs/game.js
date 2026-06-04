@@ -202,21 +202,22 @@
       ctx.fillText(emoji, 0, -headR * 1.30);
     } else {
       // Face items (sunglasses, headphones, goggles): the glyph's natural
-      // left-right axis should align with the snake's left-right axis
-      // (perpendicular to facing). Rotating by `angle` makes the glyph's
-      // "up" point in the direction of motion, which puts the lenses /
-      // ear-cups across the face — exactly where you'd wear them.
-      // Position slightly forward toward the eyes for a worn-on-face look.
-      ctx.rotate(angle);
-      const size = headR * 2.2; // bumped from 1.7 — was reading as a tooth
+      // x-axis (where the two lenses / ear-cups sit) needs to align with
+      // the snake's perpendicular-to-facing axis — that's where the two
+      // eyes are. Rotation = angle + PI/2 maps glyph-X → snake-perp.
+      // After this rotation, drawing at local (0, -delta) puts the item
+      // FORWARD on the head (over the eyes), not behind it.
+      ctx.rotate(angle + Math.PI / 2);
+      const size = headR * 2.4;
       ctx.font = `${size}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.shadowColor = 'rgba(0,0,0,0.55)';
       ctx.shadowBlur = Math.max(4, headR * 0.35);
       ctx.shadowOffsetY = Math.max(1, headR * 0.08);
-      // Forward offset puts it on the face, not the neck
-      ctx.fillText(emoji, headR * 0.15, 0);
+      // Forward (world direction of motion) = local -Y after the rotation.
+      // Slight forward offset puts the lenses over the eyes.
+      ctx.fillText(emoji, 0, -headR * 0.20);
     }
     ctx.restore();
   }
