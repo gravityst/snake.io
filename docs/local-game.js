@@ -22,24 +22,24 @@ class LocalGame {
     // `radius` over `shrinkTime` seconds, then HOLD the next phase, etc.
     // Tunable: change the array and the match feel changes.
     this.ROYALE_PHASES = [
-      { hold: 60, shrinkTime: 30, radius: 2800 },  // first warning at 60s, then 30s closing
-      { hold: 45, shrinkTime: 25, radius: 1500 },
-      { hold: 35, shrinkTime: 20, radius:  700 },
-      { hold: 25, shrinkTime: 15, radius:  300 },
-      { hold: 20, shrinkTime: 12, radius:  120 },  // final tight ring
+      { hold: 60, shrinkTime: 30, radius: 1800 },
+      { hold: 45, shrinkTime: 25, radius: 1000 },
+      { hold: 35, shrinkTime: 20, radius:  500 },
+      { hold: 25, shrinkTime: 15, radius:  220 },
+      { hold: 20, shrinkTime: 12, radius:   80 },
     ];
-    this.safeRadius     = mode === 'royale' ? 4500 : this.MAP_SIZE / 2 - 250;
+    this.safeRadius     = mode === 'royale' ? 2800 : this.MAP_SIZE / 2 - 250;
     this.safePrevRadius = this.safeRadius;
     this.safeTargetRadius = this.safeRadius;
     this.shrinkPulse = 0;
     this.royalePhaseIdx   = 0;
     this.royalePhaseState = 'hold';   // 'hold' | 'shrink' | 'done'
-    this.royalePhaseTimer = 0;        // seconds within current state
-    this.royaleEvents     = [];       // ring buffer of pending "phase changed" notifications
-    // Zone center drifts toward the player (world-units/sec)
+    this.royalePhaseTimer = 0;
+    this.royaleEvents     = [];
+    // Fixed center at origin — drifting made the boundary appear to "swim"
+    // across the world as the camera followed the player.
     this.safeCenterX = 0;
     this.safeCenterY = 0;
-    this.zoneDriftSpeed = 30;         // calm drift
 
     this.snakes = [];
     this.food = [];
@@ -188,29 +188,8 @@ class LocalGame {
     // Collisions
     this._checkCollisions();
 
-    // Battle Royale: smooth drift toward player + steady shrink, NO pulse
+    // Battle Royale: phased shrink (no drift — center stays at origin)
     if (this.mode === 'royale') {
-      // Drift zone center toward the player at a steady, calm rate
-      const player = this.snakes.find(s => s.id === this.playerId);
-      if (player && player.alive && player.segments.length > 0) {
-        const tx = player.segments[0].x;
-        const ty = player.segments[0].y;
-        const dx = tx - this.safeCenterX;
-        const dy = ty - this.safeCenterY;
-        const d = Math.sqrt(dx*dx + dy*dy);
-        if (d > 1) {
-          // Cap how far the center can wander from origin so the arena
-          // never slips off the map.
-          const maxOffset = this.MAP_SIZE / 2 - this.safeRadius - 100;
-          const step = Math.min(d, this.zoneDriftSpeed * dt);
-          let nx = this.safeCenterX + (dx/d) * step;
-          let ny = this.safeCenterY + (dy/d) * step;
-          const off = Math.sqrt(nx*nx + ny*ny);
-          if (off > maxOffset && maxOffset > 0) { nx *= maxOffset/off; ny *= maxOffset/off; }
-          this.safeCenterX = nx;
-          this.safeCenterY = ny;
-        }
-      }
       // ---- Phased shrink (hold N seconds → shrink M seconds → repeat) ----
       this.royalePhaseTimer += dt;
       const phase = this.ROYALE_PHASES[this.royalePhaseIdx];

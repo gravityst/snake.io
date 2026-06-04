@@ -2070,38 +2070,75 @@
       }
     }
 
-    // Slim phase pill (top center) — one line, low profile
+    // Phase pill (top-center, moderate size — readable without dominating)
     ctx.save();
-    const phaseLabel = st.state === 'done'
+    const isShrink = st.state === 'shrink';
+    const isDone = st.state === 'done';
+    const accent = isShrink ? '#fb7185' : '#5eead4';
+    const stateLabel = isDone
       ? 'FINAL ZONE'
-      : st.state === 'shrink'
-        ? `CLOSING ${Math.ceil(st.timeRemaining)}s`
-        : `P${st.phaseIdx + 1}/${st.totalPhases} · ${Math.ceil(st.timeRemaining)}s`;
-    const fullText = `${phaseLabel}  ·  ${st.alive} alive`;
-    ctx.font = "700 11px 'Inter', 'Space Grotesk', sans-serif";
-    const tw = Math.max(150, ctx.measureText(fullText).width + 28);
-    const pillH = 22;
-    ctx.fillStyle = 'rgba(10,12,28,0.78)';
-    ctx.strokeStyle = st.state === 'shrink' ? 'rgba(251,113,133,0.7)' : 'rgba(94,234,212,0.45)';
-    roundRect(ctx, W/2 - tw/2, 10, tw, pillH, 11);
-    ctx.fill(); ctx.lineWidth = 1; ctx.stroke();
-    ctx.textAlign = 'center';
-    ctx.fillStyle = st.state === 'shrink' ? '#fb7185' : '#5eead4';
-    ctx.fillText(fullText, W/2, 25);
+      : isShrink
+        ? 'ZONE CLOSING'
+        : `PHASE ${st.phaseIdx + 1}/${st.totalPhases}`;
+    const timeLabel = isDone ? '' : `${Math.ceil(st.timeRemaining)}s`;
+    ctx.font = "800 13px 'Space Grotesk', 'Inter', sans-serif";
+    const stateW = ctx.measureText(stateLabel).width;
+    ctx.font = "800 15px 'Space Grotesk', 'Inter', sans-serif";
+    const timeW = timeLabel ? ctx.measureText(timeLabel).width : 0;
+    const aliveTxt = `${st.alive} ALIVE`;
+    ctx.font = "700 11px 'Inter', sans-serif";
+    const aliveW = ctx.measureText(aliveTxt).width;
+    const pillW = Math.max(220, stateW + timeW + aliveW + 88);
+    const pillH = 30;
+    ctx.fillStyle = 'rgba(10,12,28,0.85)';
+    ctx.strokeStyle = accent;
+    ctx.globalAlpha = 0.9;
+    roundRect(ctx, W/2 - pillW/2, 12, pillW, pillH, 14);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // Left accent bar
+    ctx.fillStyle = accent;
+    ctx.fillRect(W/2 - pillW/2 + 1, 14, 3, pillH - 4);
+    // Layout: state | time | divider | alive
+    let x = W/2 - pillW/2 + 18;
+    const cy = 12 + pillH/2 + 1;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = "800 13px 'Space Grotesk', 'Inter', sans-serif";
+    ctx.fillStyle = accent;
+    ctx.fillText(stateLabel, x, cy);
+    x += stateW + 10;
+    if (timeLabel) {
+      ctx.font = "800 15px 'Space Grotesk', 'Inter', sans-serif";
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillText(timeLabel, x, cy);
+      x += timeW + 12;
+    }
+    // Divider
+    ctx.fillStyle = 'rgba(148,163,184,0.35)';
+    ctx.fillRect(x, 18, 1, pillH - 12);
+    x += 10;
+    ctx.font = "700 11px 'Inter', sans-serif";
+    ctx.fillStyle = 'rgba(148,163,184,0.95)';
+    ctx.fillText(aliveTxt, x, cy);
+    ctx.textBaseline = 'alphabetic';
     ctx.restore();
 
-    // Banner notifications stack on the right
+    // Banner notifications stack on the LEFT (right side is blocked by the
+    // DOM leaderboard, which sits above the canvas in z-order).
     let by = 100;
     for (const b of royaleBanners) {
       b.life -= dt;
       if (b.life <= 0) continue;
       const alpha = Math.min(1, b.life / 0.6);
       const slideIn = Math.min(1, (b.total - b.life) / 0.25);
-      const offX = (1 - slideIn) * 60;
+      const offX = (1 - slideIn) * -60;
       ctx.save();
       ctx.globalAlpha = alpha;
       const bw = 280, bh = 56;
-      const bx = W - bw - 18 + offX;
+      const bx = 18 + offX;
       ctx.fillStyle = 'rgba(10,12,28,0.92)';
       ctx.strokeStyle = b.color || '#5eead4';
       roundRect(ctx, bx, by, bw, bh, 12);
