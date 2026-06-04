@@ -17,17 +17,29 @@ class LocalGame {
     this.BOT_COUNT = 25;
     this.MEGA_ORB_COUNT = 12;
     this.mode = mode;
-    // Battle Royale safe zone — tuned so the player can SEE the ring closing
-    // in within seconds, not minutes. Match length ~90s end-to-end.
-    this.safeRadius = mode === 'royale' ? 4500 : this.MAP_SIZE / 2 - 250;
-    this.shrinkDelay = mode === 'royale' ? 3 : 10;   // brief warm-up
-    this.shrinkRate = mode === 'royale' ? 45 : 22;   // ~90s to fully close
+    // Battle Royale phased safe zone (Fortnite-style).
+    // Each phase: HOLD at current radius for `hold` seconds, then SHRINK to
+    // `radius` over `shrinkTime` seconds, then HOLD the next phase, etc.
+    // Tunable: change the array and the match feel changes.
+    this.ROYALE_PHASES = [
+      { hold: 60, shrinkTime: 30, radius: 2800 },  // first warning at 60s, then 30s closing
+      { hold: 45, shrinkTime: 25, radius: 1500 },
+      { hold: 35, shrinkTime: 20, radius:  700 },
+      { hold: 25, shrinkTime: 15, radius:  300 },
+      { hold: 20, shrinkTime: 12, radius:  120 },  // final tight ring
+    ];
+    this.safeRadius     = mode === 'royale' ? 4500 : this.MAP_SIZE / 2 - 250;
+    this.safePrevRadius = this.safeRadius;
+    this.safeTargetRadius = this.safeRadius;
     this.shrinkPulse = 0;
-    this.safeMin = mode === 'royale' ? 350 : 600;
-    // Zone center drifts smoothly toward the player (world-units/sec)
+    this.royalePhaseIdx   = 0;
+    this.royalePhaseState = 'hold';   // 'hold' | 'shrink' | 'done'
+    this.royalePhaseTimer = 0;        // seconds within current state
+    this.royaleEvents     = [];       // ring buffer of pending "phase changed" notifications
+    // Zone center drifts toward the player (world-units/sec)
     this.safeCenterX = 0;
     this.safeCenterY = 0;
-    this.zoneDriftSpeed = 50;
+    this.zoneDriftSpeed = 30;         // calm drift
 
     this.snakes = [];
     this.food = [];
@@ -165,9 +177,31 @@ class LocalGame {
           this.safeCenterY = ny;
         }
       }
-      this.shrinkDelay = Math.max(0, this.shrinkDelay - dt);
-      if (this.shrinkDelay <= 0) {
-        this.safeRadius = Math.max(this.safeMin, this.safeRadius - this.shrinkRate * dt);
+      // ---- Phased shrink (hold N seconds → shrink M seconds → repeat) ----
+      this.royalePhaseTimer += dt;
+      const phase = this.ROYALE_PHASES[this.royalePhaseIdx];
+      if (phase) {
+        if (this.royalePhaseState === 'hold') {
+          if (this.royalePhaseTimer >= phase.hold) {
+            this.royalePhaseState = 'shrink';
+            this.royalePhaseTimer = 0;
+            this.safePrevRadius = this.safeRadius;
+            this.safeTargetRadius = phase.radius;
+            this.royaleEvents.push({ type: 'shrinkStart', radius: phase.radius, at: Date.now() });
+          }
+        } else if (this.royalePhaseState === 'shrink') {
+          // Smooth ease-in-out lerp between prevRadius → targetRadius
+          const t = Math.min(1, this.royalePhaseTimer / phase.shrinkTime);
+          const eased = t * t * (3 - 2 * t); // smoothstep
+          this.safeRadius = this.safePrevRadius + (this.safeTargetRadius - this.safePrevRadius) * eased;
+          if (t >= 1) {
+            this.safeRadius = this.safeTargetRadius;
+            this.royalePhaseIdx++;
+            this.royalePhaseState = this.ROYALE_PHASES[this.royalePhaseIdx] ? 'hold' : 'done';
+            this.royalePhaseTimer = 0;
+            this.royaleEvents.push({ type: 'shrinkEnd', radius: this.safeRadius, at: Date.now() });
+          }
+        }
       }
       this.shrinkPulse = 0; // no bobbing
     }
@@ -178,6 +212,39 @@ class LocalGame {
     // Replenish
     while (this.food.length < this.FOOD_COUNT) this.food.push(this._createFood());
     while (this.megaOrbs.length < this.MEGA_ORB_COUNT) this.megaOrbs.push(this._createMegaOrb());
+  }
+
+  // Snapshot of the Battle Royale phase machine for the HUD.
+  // Returns null when not in royale mode.
+  getRoyaleStatus() {
+    if (this.mode !== 'royale') return null;
+    const phase = this.ROYALE_PHASES[this.royalePhaseIdx];
+    const winner = this.snakes.find(s => !s.isBot && s.alive)
+      ? null
+      : (this.snakes.filter(s => s.alive)[0] || null);
+    let timeRemaining = 0;
+    if (phase && this.royalePhaseState === 'hold') {
+      timeRemaining = Math.max(0, phase.hold - this.royalePhaseTimer);
+    } else if (phase && this.royalePhaseState === 'shrink') {
+      timeRemaining = Math.max(0, phase.shrinkTime - this.royalePhaseTimer);
+    }
+    // Drain events for the client to display as banner notifications
+    const events = this.royaleEvents;
+    this.royaleEvents = [];
+    return {
+      state: this.royalePhaseState,
+      phaseIdx: this.royalePhaseIdx,
+      totalPhases: this.ROYALE_PHASES.length,
+      timeRemaining,
+      currentRadius: this.safeRadius,
+      targetRadius: this.safeTargetRadius,
+      centerX: this.safeCenterX,
+      centerY: this.safeCenterY,
+      alive: this.snakes.filter(s => s.alive).length,
+      events,
+      winner: winner && !winner.isBot ? winner.name : null,
+      isDead: !this.snakes.find(s => !s.isBot && s.alive),
+    };
   }
 
   _updateSnake(snake, dt) {

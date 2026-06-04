@@ -148,29 +148,33 @@
   //   'crown'  — sits above head from camera POV
   //   'face'   — drawn ON the head (sunglasses, monocle, goggles)
   //   'around' — small extras drawn around the head (stars, fire)
+  // null = no good isolated emoji; fall back to canvas paint (legacy renderer).
+  // Avoid emoji that include a face (😇🥳🧙🐱🐂🧐👼👨‍🍳 etc.) because the
+  // face draws right onto the snake's head and looks like the snake is
+  // wearing a tiny costume of a person.
   const ACC_EMOJI = [
     null,
     ['👑',  'crown'],   // 1 Crown
     ['🎩',  'crown'],   // 2 Top Hat
     ['🕶️', 'face'],    // 3 Sunglasses
-    ['😇',  'crown'],   // 4 Halo  (halo on top, face behind snake head)
-    ['🥳',  'crown'],   // 5 Party Hat
-    ['🎌',  'crown'],   // 6 Ninja Band → twin flags (band-ish vibe)
+    null,                // 4 Halo → painted (emoji 😇 has face)
+    ['🎉',  'crown'],   // 5 Party Hat → party popper (was 🥳 face)
+    null,                // 6 Ninja Band → painted
     ['🌸',  'crown'],   // 7 Flower
     ['📡',  'crown'],   // 8 Antenna (satellite dish)
-    ['🎀',  'crown'],   // 9 Bow Tie (above the head; ID is "bow" anyway)
-    ['🧙',  'crown'],   // 10 Wizard
-    ['🐱',  'crown'],   // 11 Cat
-    ['🐂',  'crown'],   // 12 Viking → ox (horns visible)
+    ['🎀',  'crown'],   // 9 Bow Tie
+    null,                // 10 Wizard Hat → painted (was 🧙 full wizard)
+    null,                // 11 Cat Ears → painted
+    null,                // 12 Viking Horns → painted
     ['🔥',  'crown'],   // 13 Fire
     ['❄️',  'crown'],   // 14 Ice Crown
-    ['🩹',  'face'],    // 15 Bandana → bandage
+    null,                // 15 Bandana → painted
     ['⭐',  'crown'],   // 16 Stars
-    ['🧐',  'face'],    // 17 Monocle
-    ['🏴‍☠️','crown'],   // 18 Pirate (skull flag)
-    ['👼',  'crown'],   // 19 Angel
-    ['🎧',  'face'],    // 20 Headphones — on/around the head
-    ['👨‍🍳','crown'],   // 21 Chef
+    null,                // 17 Monocle → painted
+    null,                // 18 Pirate Hat → painted skull-and-crossbones
+    null,                // 19 Angel Wings → painted
+    ['🎧',  'face'],    // 20 Headphones
+    null,                // 21 Chef Hat → painted
     ['🥽',  'face'],    // 22 Goggles
     ['🍄',  'crown'],   // 23 Mushroom
   ];
@@ -178,29 +182,27 @@
   function drawAccessory(ctx, accId, hx, hy, headR, angle) {
     if (accId <= 0 || accId >= ACC_EMOJI.length) return;
     const entry = ACC_EMOJI[accId];
-    if (!entry) return;
-    const [emoji, kind] = entry;
-    // Stay upright — emoji glyphs look wrong when rotated with the snake.
-    // Drawn in screen space so they always face the camera.
-    const size = headR * (kind === 'face' ? 1.7 : 2.6);
-    let ax = hx, ay = hy;
-    if (kind === 'crown') {
-      // Above the head from camera POV
-      ay = hy - headR * 1.35;
-    } else if (kind === 'face') {
-      // Directly over the head
-      ay = hy + headR * 0.05;
+    if (!entry) {
+      // No safe emoji — fall through to canvas-painted version.
+      return _legacyDrawAccessory(ctx, accId, hx, hy, headR, angle);
     }
+    const [emoji, kind] = entry;
+    const size = headR * (kind === 'face' ? 1.7 : 2.4);
+    // Rotate with the snake's head so the accessory sits on TOP of the head
+    // (matches the painted-accessory convention; otherwise glyphs render
+    // "sideways" relative to the head when the snake turns).
     ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(angle - Math.PI / 2);
+    const offsetY = kind === 'crown' ? -headR * 1.30 : 0;
     ctx.font = `${size}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    // Soft drop shadow to seat them on the head
     ctx.shadowColor = 'rgba(0,0,0,0.55)';
     ctx.shadowBlur = Math.max(4, headR * 0.35);
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = Math.max(1, headR * 0.08);
-    ctx.fillText(emoji, ax, ay);
+    ctx.fillText(emoji, 0, offsetY);
     ctx.restore();
   }
 
@@ -1065,6 +1067,10 @@
   let mpRoyale = null;
   // Royale "sealed" notice on home/room screens
   let royaleSealedTimer = 0;
+  // Local royale phase tracker — refreshed each frame from LocalGame.getRoyaleStatus()
+  let localRoyaleStatus = null;
+  // Ephemeral banner notifications (e.g. "ZONE IS NOW CLOSING")
+  let royaleBanners = []; // { text, sub, color, life, total }
 
   // --- Parallax starfield ---
   const stars = [];
@@ -2041,7 +2047,124 @@
   }
 
   // ===== Battle Royale HUD: countdown / damage vignette / winner screen =====
+  function pushRoyaleBanner(text, sub, color) {
+    royaleBanners.push({ text, sub, color, life: 3.2, total: 3.2 });
+    if (royaleBanners.length > 4) royaleBanners.shift();
+  }
+
+  function drawLocalRoyaleHUD(dt) {
+    const st = localRoyaleStatus;
+    if (!st) return;
+    const W = canvas.width, H = canvas.height;
+
+    // Drain events → banners
+    if (st.events && st.events.length) {
+      for (const ev of st.events) {
+        if (ev.type === 'shrinkStart') {
+          pushRoyaleBanner('ZONE IS NOW CLOSING', `Next safe radius: ${Math.round(ev.radius)}`, '#fb7185');
+        } else if (ev.type === 'shrinkEnd') {
+          pushRoyaleBanner('ZONE LOCKED', `Hold radius: ${Math.round(ev.radius)}`, '#5eead4');
+        }
+      }
+    }
+
+    // Phase pill (top center)
+    ctx.save();
+    const phaseLabel = st.state === 'done'
+      ? 'FINAL ZONE'
+      : st.state === 'shrink'
+        ? `ZONE CLOSING · ${Math.ceil(st.timeRemaining)}s`
+        : `PHASE ${st.phaseIdx + 1}/${st.totalPhases} · ${Math.ceil(st.timeRemaining)}s`;
+    const tw = Math.max(220, ctx.measureText(phaseLabel).width + 80);
+    const pillH = 38;
+    ctx.fillStyle = 'rgba(10,12,28,0.85)';
+    ctx.strokeStyle = st.state === 'shrink' ? 'rgba(251,113,133,0.95)' : 'rgba(94,234,212,0.7)';
+    roundRect(ctx, W/2 - tw/2, 14, tw, pillH, 14);
+    ctx.fill(); ctx.lineWidth = 2; ctx.stroke();
+    ctx.font = "800 14px 'Space Grotesk', 'Inter', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.fillStyle = st.state === 'shrink' ? '#fb7185' : '#5eead4';
+    ctx.fillText(phaseLabel, W/2, 38);
+    // Alive counter under it
+    ctx.font = "600 11px 'Inter', sans-serif";
+    ctx.fillStyle = 'rgba(148,163,184,0.85)';
+    ctx.fillText(`${st.alive} ALIVE`, W/2, 58);
+    ctx.restore();
+
+    // Banner notifications stack on the right
+    let by = 100;
+    for (const b of royaleBanners) {
+      b.life -= dt;
+      if (b.life <= 0) continue;
+      const alpha = Math.min(1, b.life / 0.6);
+      const slideIn = Math.min(1, (b.total - b.life) / 0.25);
+      const offX = (1 - slideIn) * 60;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const bw = 280, bh = 56;
+      const bx = W - bw - 18 + offX;
+      ctx.fillStyle = 'rgba(10,12,28,0.92)';
+      ctx.strokeStyle = b.color || '#5eead4';
+      roundRect(ctx, bx, by, bw, bh, 12);
+      ctx.fill(); ctx.lineWidth = 2; ctx.stroke();
+      // Left accent stripe
+      ctx.fillStyle = b.color || '#5eead4';
+      ctx.fillRect(bx, by, 4, bh);
+      ctx.font = "800 13px 'Space Grotesk', sans-serif";
+      ctx.textAlign = 'left';
+      ctx.fillStyle = b.color || '#5eead4';
+      ctx.fillText(b.text, bx + 16, by + 22);
+      ctx.font = "500 11px 'Inter', sans-serif";
+      ctx.fillStyle = 'rgba(241,245,249,0.85)';
+      ctx.fillText(b.sub, bx + 16, by + 40);
+      ctx.restore();
+      by += bh + 8;
+    }
+    royaleBanners = royaleBanners.filter(b => b.life > 0);
+
+    // Damage vignette while outside the zone (player dead → skip)
+    if (!st.isDead && st.state !== 'done') {
+      const me = snakes.find(s => s.id === myId);
+      if (me && me.alive && me.segments.length > 0) {
+        const h = me.segments[0];
+        const dx = h.x - (st.centerX || 0), dy = h.y - (st.centerY || 0);
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > st.currentRadius) {
+          const pulse = 0.35 + Math.sin(animTime * 4) * 0.15;
+          const grad = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.2, W/2, H/2, Math.max(W,H)*0.7);
+          grad.addColorStop(0, 'rgba(251,113,133,0)');
+          grad.addColorStop(1, `rgba(251,113,133,${pulse})`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, W, H);
+        }
+      }
+    }
+
+    // Winner notice when the player wins (last alive, not dead)
+    if (st.state === 'done' && !st.isDead && st.alive === 1) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(6,8,26,0.7)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'center';
+      ctx.font = "800 56px 'Space Grotesk', sans-serif";
+      ctx.fillStyle = '#5eead4';
+      ctx.shadowColor = 'rgba(94,234,212,0.6)';
+      ctx.shadowBlur = 30;
+      ctx.fillText('VICTORY ROYALE', W/2, H/2 - 10);
+      ctx.shadowBlur = 0;
+      ctx.font = "600 16px 'Inter', sans-serif";
+      ctx.fillStyle = '#f1f5f9';
+      ctx.fillText('Last snake standing', W/2, H/2 + 22);
+      ctx.restore();
+    }
+  }
+
   function drawRoyaleHUD(dt, cx, cy) {
+    // Local single-player Battle Royale HUD
+    if (localGame && localGame.mode === 'royale') {
+      drawLocalRoyaleHUD(dt);
+      return;
+    }
     if (!mpRoyale) return;
     const W = canvas.width, H = canvas.height;
     // --- Countdown overlay (during lobby/countdown) ---
@@ -2193,7 +2316,8 @@
     ctx.arc(ox, oy, r * pulse, 0, Math.PI * 2, true); // hole: counter-clockwise
     ctx.fill('evenodd');
     // Safe-zone boundary
-    ctx.strokeStyle = 'rgba(255, 180, 80, 0.85)';
+    const closing = localGame && localGame.mode === 'royale' && localGame.royalePhaseState === 'shrink';
+    ctx.strokeStyle = closing ? 'rgba(255, 90, 90, 0.95)' : 'rgba(255, 180, 80, 0.85)';
     ctx.lineWidth = 4 / zoom;
     ctx.setLineDash([14 / zoom, 14 / zoom]);
     ctx.lineDashOffset = -animTime * 24;
@@ -2201,6 +2325,18 @@
     ctx.arc(ox, oy, r * pulse, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
+    // Target-zone preview — faint inner ring showing where the safe zone is
+    // headed next (only meaningful for local royale during 'hold' phase).
+    if (localGame && localGame.mode === 'royale' && localGame.safeTargetRadius < r - 5) {
+      ctx.strokeStyle = 'rgba(94, 234, 212, 0.55)';
+      ctx.lineWidth = 2 / zoom;
+      ctx.setLineDash([6 / zoom, 10 / zoom]);
+      ctx.lineDashOffset = animTime * 18;
+      ctx.beginPath();
+      ctx.arc(ox, oy, localGame.safeTargetRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
 
   function drawFood(cx,cy) {
@@ -2756,6 +2892,12 @@
     // Screen-space overlays (outside zoom transform)
     drawKillFeed(dt);
     drawSpeedLines(dt);
+    // Pull fresh phase status from the local game so the HUD reflects current state
+    if (localGame && localGame.mode === 'royale' && typeof localGame.getRoyaleStatus === 'function') {
+      localRoyaleStatus = localGame.getRoyaleStatus();
+    } else {
+      localRoyaleStatus = null;
+    }
     drawRoyaleHUD(dt, cx, cy);
     // Spectate text
     if (spectateTimer > 0) {
