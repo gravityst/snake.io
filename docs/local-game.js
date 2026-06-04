@@ -463,9 +463,127 @@ class LocalGame {
   // walk into walls of body), closest-food / best-value-food search.
   // ============================================================
   _botAI(snake, dt) {
+    // EMERGENCY check every frame — bots react to imminent collisions even
+    // between their throttled strategic ticks. Stops the "random crashing"
+    // where a bot's planned heading was clear 100ms ago but isn't now.
+    if (this._emergencyAvoid(snake, dt)) return;
     if (snake.skill === 2) this._hardAI(snake, dt);
     else if (snake.skill === 1) this._mediumAI(snake, dt);
     else this._easyAI(snake, dt);
+  }
+
+  // Predict where the head will be in the next ~0.25s and check whether
+  // anything is going to be there. If yes, swerve to the clearest direction
+  // RIGHT NOW (don't wait for next strategic tick).
+  _emergencyAvoid(s, dt) {
+    const h = s.segments[0];
+    const speed = s.boosting ? this.BOOST_SPEED : this.SNAKE_SPEED;
+    // 0.18s of travel — far enough to react, short enough to be "right ahead"
+    const lookAhead = speed * 0.18;
+    // Predicted head position
+    const px = h.x + Math.cos(s.angle) * lookAhead;
+    const py = h.y + Math.sin(s.angle) * lookAhead;
+    const dangerR = this.HEAD_RADIUS * this._thickness(s) + 22;
+    const dangerR2 = dangerR * dangerR;
+
+    let blocked = false;
+    let closestT = Infinity;
+    let closestSegX = 0, closestSegY = 0;
+
+    // Check against every snake's body and other heads
+    for (const o of this.snakes) {
+      if (!o.alive) continue;
+      const isSelf = o.id === s.id;
+      const startK = isSelf ? 10 : 0;
+      const checkLen = Math.min(o.segments.length, 60);
+      for (let k = startK; k < checkLen; k++) {
+        const seg = o.segments[k];
+        const dx = seg.x - px, dy = seg.y - py;
+        const d2 = dx*dx + dy*dy;
+        if (d2 < dangerR2 && d2 < closestT) {
+          blocked = true;
+          closestT = d2;
+          closestSegX = seg.x;
+          closestSegY = seg.y;
+        }
+      }
+      // Head-on detection: another snake's head closing on mine
+      if (!isSelf) {
+        const oh = o.segments[0];
+        const dx = oh.x - h.x, dy = oh.y - h.y;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if (d < 220) {
+          // Are we moving toward each other?
+          const myDir = { x: Math.cos(s.angle), y: Math.sin(s.angle) };
+          const theirDir = { x: Math.cos(o.angle), y: Math.sin(o.angle) };
+          const toThem = { x: dx / d, y: dy / d };
+          const myDot = myDir.x * toThem.x + myDir.y * toThem.y;
+          const theirDot = theirDir.x * (-toThem.x) + theirDir.y * (-toThem.y);
+          if (myDot > 0.6 && theirDot > 0.6) {
+            // Yield — swerve away from the head-on
+            blocked = true;
+            closestT = d * d;
+            closestSegX = oh.x;
+            closestSegY = oh.y;
+          }
+        }
+      }
+    }
+
+    // Also bail if running into the world border within lookAhead
+    const wall = this.MAP_SIZE / 2 - 80;
+    if (Math.abs(px) > wall || Math.abs(py) > wall) {
+      blocked = true;
+      closestSegX = Math.sign(px) * wall;
+      closestSegY = Math.sign(py) * wall;
+    }
+    // BR zone edge
+    if (this.mode === 'royale' && this.matchState === 'active') {
+      const cx = this.safeCenterX, cy = this.safeCenterY;
+      const ddx = px - cx, ddy = py - cy;
+      if (ddx*ddx + ddy*ddy > (this.safeRadius - 40) ** 2) {
+        blocked = true;
+        // Pull toward center
+        closestSegX = px + (px - cx);
+        closestSegY = py + (py - cy);
+      }
+    }
+
+    if (!blocked) return false;
+
+    // Find the clearest of 7 candidate angles (forward, ±30°, ±70°, ±115°)
+    const OFFSETS = [-2.0, -1.2, -0.55, 0, 0.55, 1.2, 2.0];
+    let bestScore = -Infinity, bestAngle = s.angle;
+    for (const dA of OFFSETS) {
+      const testA = s.angle + dA;
+      const tpx = h.x + Math.cos(testA) * lookAhead;
+      const tpy = h.y + Math.sin(testA) * lookAhead;
+      let minD2 = Infinity;
+      for (const o of this.snakes) {
+        if (!o.alive) continue;
+        const isSelf = o.id === s.id;
+        const startK = isSelf ? 10 : 0;
+        const checkLen = Math.min(o.segments.length, 60);
+        for (let k = startK; k < checkLen; k++) {
+          const seg = o.segments[k];
+          const dx = seg.x - tpx, dy = seg.y - tpy;
+          const d2 = dx*dx + dy*dy;
+          if (d2 < minD2) minD2 = d2;
+        }
+      }
+      // Penalize wall / outside-zone candidates
+      if (Math.abs(tpx) > wall || Math.abs(tpy) > wall) minD2 = Math.min(minD2, 100);
+      if (this.mode === 'royale' && this.matchState === 'active') {
+        const ddx = tpx - this.safeCenterX, ddy = tpy - this.safeCenterY;
+        if (ddx*ddx + ddy*ddy > (this.safeRadius - 40) ** 2) minD2 = Math.min(minD2, 100);
+      }
+      const turnPenalty = Math.abs(dA) * 1500;
+      const score = minD2 - turnPenalty;
+      if (score > bestScore) { bestScore = score; bestAngle = testA; }
+    }
+    s.targetAngle = bestAngle;
+    s.boosting = false;
+    return true;
   }
 
   // Multi-angle lookahead: scan 7 candidate headings (forward + ±25°, ±55°,

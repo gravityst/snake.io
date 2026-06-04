@@ -828,12 +828,93 @@ class Room {
     return false;
   }
   _botAI(s, dt) {
-    // BR mode promotes every bot one tier and runs the harder tier of AI.
+    // EMERGENCY collision check every frame, before the throttled
+    // strategic AI runs. Catches imminent crashes that the planned heading
+    // didn't anticipate (other snakes moved since last decision).
+    if (this._emergencyAvoid(s, dt)) return;
     const isBR = this.mode === 'royale' && this.royaleState === 'active';
     const effSkill = isBR ? Math.min(SKILL_ADVANCED, s.skill + 1) : s.skill;
     if (effSkill === SKILL_ADVANCED) this._hardAI(s, dt);
     else if (effSkill === SKILL_AMATEUR) this._mediumAI(s, dt);
     else this._easyAI(s, dt);
+  }
+
+  _emergencyAvoid(s, dt) {
+    const h = s.segments[0];
+    const speed = s.boosting ? BOOST_SPEED : SNAKE_SPEED;
+    const lookAhead = speed * 0.18;
+    const px = h.x + Math.cos(s.angle) * lookAhead;
+    const py = h.y + Math.sin(s.angle) * lookAhead;
+    const dangerR = HEAD_RADIUS * this._thickness(s) + 22;
+    const dangerR2 = dangerR * dangerR;
+    let blocked = false, closestT = Infinity;
+    for (const [, o] of this.snakes) {
+      if (!o.alive) continue;
+      const isSelf = o.id === s.id;
+      const startK = isSelf ? 10 : 0;
+      const checkLen = Math.min(o.segments.length, 60);
+      for (let k = startK; k < checkLen; k++) {
+        const seg = o.segments[k];
+        const dx = seg.x - px, dy = seg.y - py;
+        const d2 = dx*dx + dy*dy;
+        if (d2 < dangerR2 && d2 < closestT) {
+          blocked = true; closestT = d2;
+        }
+      }
+      // Head-on detection
+      if (!isSelf) {
+        const oh = o.segments[0];
+        const dx = oh.x - h.x, dy = oh.y - h.y;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if (d < 220) {
+          const myDir = { x: Math.cos(s.angle), y: Math.sin(s.angle) };
+          const theirDir = { x: Math.cos(o.angle), y: Math.sin(o.angle) };
+          const toThem = { x: dx / d, y: dy / d };
+          const myDot = myDir.x * toThem.x + myDir.y * toThem.y;
+          const theirDot = theirDir.x * (-toThem.x) + theirDir.y * (-toThem.y);
+          if (myDot > 0.6 && theirDot > 0.6) blocked = true;
+        }
+      }
+    }
+    const wall = MAP_SIZE / 2 - 80;
+    if (Math.abs(px) > wall || Math.abs(py) > wall) blocked = true;
+    const inBR = this.mode === 'royale' && this.royaleState === 'active';
+    if (inBR) {
+      const ddx = px - this.zone.cx, ddy = py - this.zone.cy;
+      if (ddx*ddx + ddy*ddy > (this.zone.radius - 40) ** 2) blocked = true;
+    }
+    if (!blocked) return false;
+    // Pick the clearest candidate heading
+    const OFFSETS = [-2.0, -1.2, -0.55, 0, 0.55, 1.2, 2.0];
+    let bestScore = -Infinity, bestAngle = s.angle;
+    for (const dA of OFFSETS) {
+      const testA = s.angle + dA;
+      const tpx = h.x + Math.cos(testA) * lookAhead;
+      const tpy = h.y + Math.sin(testA) * lookAhead;
+      let minD2 = Infinity;
+      for (const [, o] of this.snakes) {
+        if (!o.alive) continue;
+        const isSelf = o.id === s.id;
+        const startK = isSelf ? 10 : 0;
+        const checkLen = Math.min(o.segments.length, 60);
+        for (let k = startK; k < checkLen; k++) {
+          const seg = o.segments[k];
+          const dx = seg.x - tpx, dy = seg.y - tpy;
+          const d2 = dx*dx + dy*dy;
+          if (d2 < minD2) minD2 = d2;
+        }
+      }
+      if (Math.abs(tpx) > wall || Math.abs(tpy) > wall) minD2 = Math.min(minD2, 100);
+      if (inBR) {
+        const ddx = tpx - this.zone.cx, ddy = tpy - this.zone.cy;
+        if (ddx*ddx + ddy*ddy > (this.zone.radius - 40) ** 2) minD2 = Math.min(minD2, 100);
+      }
+      const score = minD2 - Math.abs(dA) * 1500;
+      if (score > bestScore) { bestScore = score; bestAngle = testA; }
+    }
+    s.targetAngle = bestAngle;
+    s.boosting = false;
+    return true;
   }
 
   // Multi-angle forward lookahead. Scans 7 candidate headings (forward, ±25°,

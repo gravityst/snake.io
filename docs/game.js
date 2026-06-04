@@ -1502,59 +1502,175 @@
   }
 
   // --- MULTIPLAYER ---
+  // Filter + search state for the room browser
+  let roomFilter = 'all';        // 'all' | 'solo' | 'royale' | 'team'
+  let roomSearchTerm = '';
+  let lastRoomData = [];
+
+  function renderRoomList() {
+    const rooms = lastRoomData;
+    roomList.innerHTML = '';
+    // Apply filter + search
+    const term = roomSearchTerm.trim().toLowerCase();
+    const filtered = rooms.filter(r => {
+      if (roomFilter !== 'all' && r.mode !== roomFilter) return false;
+      if (!term) return true;
+      return r.name.toLowerCase().includes(term) ||
+             (r.code && r.code.toLowerCase().includes(term));
+    });
+    // Empty state
+    if (filtered.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'room-empty';
+      empty.innerHTML = term
+        ? `<div class="room-empty-icon">🔍</div>No rooms match "${escapeHtml(term)}"`
+        : `<div class="room-empty-icon">🎮</div>No ${roomFilter === 'all' ? '' : roomFilter + ' '}matches running yet.<br>Be the first — hit <strong>Create Room</strong>.`;
+      roomList.appendChild(empty);
+    } else {
+      for (const room of filtered) roomList.appendChild(buildRoomCard(room));
+    }
+    // Summary line
+    const summary = document.getElementById('roomSummary');
+    if (summary) {
+      const live = rooms.filter(r => r.players > 0).length;
+      summary.innerHTML = `<strong>${rooms.length}</strong> rooms · <strong>${live}</strong> live`;
+    }
+  }
+
+  function buildRoomCard(room) {
+    const card = document.createElement('div');
+    const modeCls = `mode-${room.mode}`;
+    const isFull = room.players >= room.maxPlayers;
+    card.className = `room-card ${modeCls}${isFull ? ' full' : ''}`;
+
+    // Mode icon: M-letter or symbol
+    const icons = {
+      solo:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>`,
+      team:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="3"/><circle cx="17" cy="9" r="3"/><path d="M3 18c0-3 3-5 6-5s6 2 6 5"/><path d="M14 14c2 0 4 1.5 4 4"/></svg>`,
+      royale: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19l3-12 4 7 2-4 2 4 4-7 3 12z"/></svg>`,
+    };
+
+    // Status badge for royale lobby/countdown
+    let statusBadge = '';
+    if (room.mode === 'royale') {
+      if (room.royaleState === 'countdown' && room.royaleCountdownMs > 0) {
+        const secs = Math.ceil(room.royaleCountdownMs / 1000);
+        statusBadge = `<span class="mode-badge live">STARTS IN ${secs}s</span>`;
+      } else if (room.royaleState === 'lobby') {
+        statusBadge = `<span class="mode-badge royale">WAITING</span>`;
+      }
+    }
+    const customBadge = room.isCustom ? `<span class="mode-badge custom">CUSTOM</span>` : '';
+    const modeName = room.mode === 'royale' ? 'Battle Royale'
+                   : room.mode === 'team'   ? `Team ${room.teamSize}v${room.teamSize}`
+                   : 'Free for All';
+    const creatorLine = room.isCustom && room.creatorName
+      ? `<span>by ${escapeHtml(room.creatorName)}</span><span class="sep">·</span>`
+      : '';
+    const codePill = (room.isCustom && room.code)
+      ? `<button class="copy-code-pill" data-code="${room.code}" title="Copy room code">${room.code}</button>`
+      : '';
+
+    const fillPct = Math.round((room.players / room.maxPlayers) * 100);
+
+    card.innerHTML = `
+      <div class="room-mode-icon ${modeCls}">${icons[room.mode] || icons.solo}</div>
+      <div class="room-info">
+        <div class="room-title-row">
+          <span class="room-name">${escapeHtml(room.name)}</span>
+          ${statusBadge}
+          ${customBadge}
+          ${codePill}
+        </div>
+        <div class="room-meta">
+          <span>${modeName}</span>
+          <span class="sep">·</span>
+          ${creatorLine}
+          <span>${room.players === 0 ? 'Empty lobby' : (room.players === 1 ? '1 snake' : `${room.players} snakes`)}</span>
+        </div>
+      </div>
+      <div class="room-fill">
+        <div class="room-fill-count">${room.players}<span class="max">/${room.maxPlayers}</span></div>
+        <div class="room-fill-bar"><div class="room-fill-bar-inner" style="width:${fillPct}%;"></div></div>
+      </div>
+    `;
+
+    const codeBtn = card.querySelector('.copy-code-pill');
+    if (codeBtn) {
+      codeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(codeBtn.dataset.code).then(() => {
+          const orig = codeBtn.textContent;
+          codeBtn.textContent = 'COPIED';
+          setTimeout(() => { codeBtn.textContent = orig; }, 1400);
+        });
+      });
+    }
+    if (!isFull) {
+      card.addEventListener('click', () => {
+        const joinRoom = () => {
+          if (roomPollInterval) { clearInterval(roomPollInterval); roomPollInterval = null; }
+          if (room.mode === 'team') showTeamSelector(room.id, room.teams);
+          else startMultiplayerGame(room.id);
+        };
+        if (room.mode === 'royale') showBRJoinConfirm(room, joinRoom);
+        else joinRoom();
+      });
+    }
+    return card;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+
   async function fetchRooms() {
     try {
       const res = await fetch(SERVER_URL + '/api/rooms');
       const rooms = await res.json();
-      roomList.innerHTML = '';
-      for (const room of rooms) {
-        const card = document.createElement('div');
-        card.className = 'room-card' + (room.players >= room.maxPlayers ? ' full' : '');
-        const modeBadge = room.mode==='team'
-          ? `<span class="mode-badge team">TEAM ${room.teamSize}v${room.teamSize}</span>`
-          : room.mode==='royale'
-          ? `<span class="mode-badge royale">BATTLE ROYALE</span>`
-          : `<span class="mode-badge solo">SOLO</span>`;
-        const customBadge = room.isCustom ? '<span class="mode-badge custom">CUSTOM</span>' : '';
-        const copyBtn = (room.isCustom && room.code) ? `<button class="copy-code-btn" data-code="${room.code}">Copy Code</button>` : '';
-        // BR countdown indicator
-        let extra = '';
-        if (room.mode === 'royale' && room.royaleState === 'countdown' && room.royaleCountdownMs > 0) {
-          const secs = Math.ceil(room.royaleCountdownMs / 1000);
-          extra = `<span class="mode-badge royale" style="background:rgba(251,113,133,0.15);color:#fb7185;border-color:rgba(251,113,133,0.35);">STARTS IN ${secs}s</span>`;
-        } else if (room.mode === 'royale' && room.royaleState === 'lobby') {
-          extra = `<span class="mode-badge royale" style="background:rgba(94,234,212,0.15);color:#5eead4;border-color:rgba(94,234,212,0.35);">WAITING</span>`;
-        }
-        card.innerHTML = `<div class="room-left">${modeBadge}${customBadge}${extra}<span class="room-name">${room.name}</span>${copyBtn}</div><span class="room-players">${room.players}/${room.maxPlayers}</span>`;
-        const copyEl = card.querySelector('.copy-code-btn');
-        if (copyEl) {
-          copyEl.addEventListener('click', (e) => {
-            e.stopPropagation();
-            navigator.clipboard.writeText(copyEl.dataset.code).then(() => {
-              copyEl.textContent = 'Copied!';
-              setTimeout(() => { copyEl.textContent = 'Copy Code'; }, 1500);
-            });
-          });
-        }
-        if (room.players < room.maxPlayers) {
-          card.addEventListener('click', () => {
-            const joinRoom = () => {
-              if (roomPollInterval) { clearInterval(roomPollInterval); roomPollInterval=null; }
-              if (room.mode === 'team') showTeamSelector(room.id, room.teams);
-              else startMultiplayerGame(room.id);
-            };
-            // BR rooms: confirm before joining (no respawn)
-            if (room.mode === 'royale') {
-              showBRJoinConfirm(room, joinRoom);
-            } else {
-              joinRoom();
-            }
-          });
-        }
-        roomList.appendChild(card);
-      }
+      lastRoomData = rooms;
+      renderRoomList();
     } catch (e) {
-      roomList.innerHTML = '<p style="color:#f44;text-align:center;">Could not connect to server</p>';
+      roomList.innerHTML = `
+        <div class="room-empty">
+          <div class="room-empty-icon">⚠</div>
+          Could not reach the server.<br>
+          <span style="font-size:11px;opacity:0.7;">Check your connection or pick a different server in settings.</span>
+        </div>`;
+    }
+  }
+
+  // Wire filter tabs + search input (once)
+  {
+    const tabContainer = document.getElementById('roomFilterTabs');
+    if (tabContainer) {
+      tabContainer.addEventListener('click', (e) => {
+        const btn = e.target.closest('.filter-tab');
+        if (!btn) return;
+        roomFilter = btn.dataset.filter;
+        for (const t of tabContainer.querySelectorAll('.filter-tab')) {
+          t.classList.toggle('active', t === btn);
+        }
+        renderRoomList();
+      });
+    }
+    const searchInput = document.getElementById('roomSearch');
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        roomSearchTerm = searchInput.value;
+        renderRoomList();
+      });
+    }
+    const clearBtn = document.getElementById('roomSearchClear');
+    if (clearBtn && searchInput) {
+      clearBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        roomSearchTerm = '';
+        renderRoomList();
+        searchInput.focus();
+      });
     }
   }
 
