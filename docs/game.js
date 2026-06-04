@@ -1334,6 +1334,8 @@
     localRoyaleStatus = null;
     mpRoyale = null;
     spectatingBR = false;
+    intendedBR = false;
+    if (brHandshakeTimer) { clearTimeout(brHandshakeTimer); brHandshakeTimer = null; }
     clearVictoryConfetti();
     try { if (ws && ws.readyState <= 1) ws.close(); } catch {}
     hideAllScreens();
@@ -1831,9 +1833,34 @@
     });
   }
 
+  // Remember whether the user *intended* to join a BR room so the client
+  // can warn them when the server returns no BR state (server out of date).
+  let intendedBR = false;
+  let brHandshakeTimer = null;
   function startMultiplayerGame(roomId, teamId) {
     gameMode = 'multiplayer';
     spectatingBR = false;
+    // Track whether the room we're joining is BR (room data was last cached)
+    const cached = (lastRoomData || []).find(r => r.id === roomId);
+    intendedBR = !!(cached && cached.mode === 'royale');
+    if (brHandshakeTimer) { clearTimeout(brHandshakeTimer); brHandshakeTimer = null; }
+    if (intendedBR) {
+      // Give the server up to 4s to send any 0x08 royale-state packet.
+      // If none arrives, the server is running an older build that doesn't
+      // know about Battle Royale — surface it instead of dropping the
+      // user into a normal-looking game.
+      brHandshakeTimer = setTimeout(() => {
+        if (intendedBR && !mpRoyale) {
+          alert(
+            'Battle Royale isn\'t available on this server yet — the server\n' +
+            'is running an older build. The match has fallen back to a normal\n' +
+            'multiplayer game. Try again in a couple of minutes (the server\n' +
+            'redeploys automatically) or switch to single-player BR for now.'
+          );
+        }
+        brHandshakeTimer = null;
+      }, 4000);
+    }
     myKills = 0; displayScore = 0; prevScore = 0; scorePopups = []; killFeed = [];
     lifeStartTime = performance.now(); foodEaten = 0; peakScore = 0; emoteDisplays = [];
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;

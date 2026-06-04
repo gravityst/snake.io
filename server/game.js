@@ -138,7 +138,9 @@ class Room {
 
     this.spawnFood();
     this.spawnMegaOrbs();
-    this.spawnBots(MAX_BOTS);
+    // BR rooms ALWAYS need exactly 20 snakes (player+bot mix). Other modes
+    // use the smaller MAX_BOTS so the room doesn't feel empty.
+    this.spawnBots(this.mode === 'royale' ? ROYALE_MAX_PLAYERS : MAX_BOTS);
 
     this.lastTick = Date.now();
     this.tickCount = 0;
