@@ -141,25 +141,84 @@
     { name: 'Mushroom' },
   ];
 
-  // Small helpers for 3D-style shading on accessories
-  function _radialGrad(ctx, x, y, ri, ro, cInner, cOuter) {
-    const g = ctx.createRadialGradient(x, y, ri, x, y, ro);
-    g.addColorStop(0, cInner); g.addColorStop(1, cOuter);
-    return g;
-  }
-  function _linearGrad(ctx, x1, y1, x2, y2, c1, c2) {
-    const g = ctx.createLinearGradient(x1, y1, x2, y2);
-    g.addColorStop(0, c1); g.addColorStop(1, c2);
-    return g;
-  }
-  function _shineDot(ctx, x, y, rad, color = 'rgba(255,255,255,0.85)') {
+  // ---- Emoji-based accessories ---------------------------------------
+  // OS-rendered emoji look genuinely 3D at any size; far better than the
+  // canvas-painted shapes ever could at headR ~14-28px. Mapped per accId.
+  // Each entry: [emoji, kind] where kind is:
+  //   'crown'  — sits above head from camera POV
+  //   'face'   — drawn ON the head (sunglasses, monocle, goggles)
+  //   'around' — small extras drawn around the head (stars, fire)
+  const ACC_EMOJI = [
+    null,
+    ['👑',  'crown'],   // 1 Crown
+    ['🎩',  'crown'],   // 2 Top Hat
+    ['🕶️', 'face'],    // 3 Sunglasses
+    ['😇',  'crown'],   // 4 Halo  (halo on top, face behind snake head)
+    ['🥳',  'crown'],   // 5 Party Hat
+    ['🎌',  'crown'],   // 6 Ninja Band → twin flags (band-ish vibe)
+    ['🌸',  'crown'],   // 7 Flower
+    ['📡',  'crown'],   // 8 Antenna (satellite dish)
+    ['🎀',  'crown'],   // 9 Bow Tie (above the head; ID is "bow" anyway)
+    ['🧙',  'crown'],   // 10 Wizard
+    ['🐱',  'crown'],   // 11 Cat
+    ['🐂',  'crown'],   // 12 Viking → ox (horns visible)
+    ['🔥',  'crown'],   // 13 Fire
+    ['❄️',  'crown'],   // 14 Ice Crown
+    ['🩹',  'face'],    // 15 Bandana → bandage
+    ['⭐',  'crown'],   // 16 Stars
+    ['🧐',  'face'],    // 17 Monocle
+    ['🏴‍☠️','crown'],   // 18 Pirate (skull flag)
+    ['👼',  'crown'],   // 19 Angel
+    ['🎧',  'face'],    // 20 Headphones — on/around the head
+    ['👨‍🍳','crown'],   // 21 Chef
+    ['🥽',  'face'],    // 22 Goggles
+    ['🍄',  'crown'],   // 23 Mushroom
+  ];
+
+  function drawAccessory(ctx, accId, hx, hy, headR, angle) {
+    if (accId <= 0 || accId >= ACC_EMOJI.length) return;
+    const entry = ACC_EMOJI[accId];
+    if (!entry) return;
+    const [emoji, kind] = entry;
+    // Stay upright — emoji glyphs look wrong when rotated with the snake.
+    // Drawn in screen space so they always face the camera.
+    const size = headR * (kind === 'face' ? 1.7 : 2.6);
+    let ax = hx, ay = hy;
+    if (kind === 'crown') {
+      // Above the head from camera POV
+      ay = hy - headR * 1.35;
+    } else if (kind === 'face') {
+      // Directly over the head
+      ay = hy + headR * 0.05;
+    }
     ctx.save();
-    ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI*2); ctx.fill();
+    ctx.font = `${size}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // Soft drop shadow to seat them on the head
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur = Math.max(4, headR * 0.35);
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = Math.max(1, headR * 0.08);
+    ctx.fillText(emoji, ax, ay);
     ctx.restore();
   }
 
-  function drawAccessory(ctx, accId, hx, hy, headR, angle) {
+  // Kept around in case anything else calls them (no-ops if unused)
+  function _radialGrad(ctx, x, y, ri, ro, cInner, cOuter) {
+    const g = ctx.createRadialGradient(x, y, ri, x, y, ro);
+    g.addColorStop(0, cInner); g.addColorStop(1, cOuter); return g;
+  }
+  function _linearGrad(ctx, x1, y1, x2, y2, c1, c2) {
+    const g = ctx.createLinearGradient(x1, y1, x2, y2);
+    g.addColorStop(0, c1); g.addColorStop(1, c2); return g;
+  }
+  function _shineDot(ctx, x, y, rad, color = 'rgba(255,255,255,0.85)') {
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Legacy canvas-painted drawer — left in for reference; unreachable.
+  function _legacyDrawAccessory(ctx, accId, hx, hy, headR, angle) {
     if (accId <= 0 || accId >= ACCESSORIES.length) return;
     const cos = Math.cos(angle), sin = Math.sin(angle);
     const topX = hx - sin * headR * 0.9, topY = hy + cos * headR * 0.9; // top of head (perpendicular to direction)
