@@ -2165,6 +2165,88 @@
     ctx.stroke();
   }
 
+  // Large flat-top hex mesh, world-anchored. Pulse-breathes subtly via animTime
+  // and brightens slightly within ~1500 world units of the camera, so the
+  // pattern feels alive without distracting from the play area.
+  const HEX_R = 220;
+  const HEX_DX = HEX_R * 1.5;
+  const HEX_DY = HEX_R * Math.sqrt(3);
+  function drawHexGrid(cx, cy) {
+    const W = canvas.width, H = canvas.height;
+    const midX = W / 2, midY = H / 2;
+    const halfW = W / (2 * zoom) + HEX_R * 2;
+    const halfH = H / (2 * zoom) + HEX_R * 2;
+    const startCol = Math.floor((cx - halfW) / HEX_DX) - 1;
+    const endCol   = Math.ceil ((cx + halfW) / HEX_DX) + 1;
+    const startRow = Math.floor((cy - halfH) / HEX_DY) - 1;
+    const endRow   = Math.ceil ((cy + halfH) / HEX_DY) + 1;
+    const breathe = 0.85 + 0.15 * Math.sin(animTime * 0.6);
+    // Outline pass — single Path2D, single stroke
+    ctx.strokeStyle = `rgba(94, 234, 212, ${0.075 * breathe})`;
+    ctx.lineWidth = 1.2 / zoom;
+    ctx.beginPath();
+    for (let col = startCol; col <= endCol; col++) {
+      const colOffsetY = (col & 1) ? HEX_DY / 2 : 0;
+      for (let row = startRow; row <= endRow; row++) {
+        const wx = col * HEX_DX;
+        const wy = row * HEX_DY + colOffsetY;
+        const x = wx - cx + midX;
+        const y = wy - cy + midY;
+        // Vertices for flat-top hexagon at angles 0, 60, 120, ...
+        for (let i = 0; i < 6; i++) {
+          const angle = i * Math.PI / 3;
+          const vx = x + HEX_R * Math.cos(angle);
+          const vy = y + HEX_R * Math.sin(angle);
+          if (i === 0) ctx.moveTo(vx, vy);
+          else ctx.lineTo(vx, vy);
+        }
+        ctx.closePath();
+      }
+    }
+    ctx.stroke();
+    // Glow ring: hexes within ~1400 world-units of the camera get a brighter
+    // overlay outline — feels like a "field of influence" around the player.
+    const auraR = 1400;
+    ctx.strokeStyle = `rgba(94, 234, 212, ${0.20 * breathe})`;
+    ctx.lineWidth = 1.6 / zoom;
+    ctx.beginPath();
+    for (let col = startCol; col <= endCol; col++) {
+      const colOffsetY = (col & 1) ? HEX_DY / 2 : 0;
+      for (let row = startRow; row <= endRow; row++) {
+        const wx = col * HEX_DX;
+        const wy = row * HEX_DY + colOffsetY;
+        const ddx = wx - cx, ddy = wy - cy;
+        if (ddx*ddx + ddy*ddy > auraR*auraR) continue;
+        const x = wx - cx + midX;
+        const y = wy - cy + midY;
+        for (let i = 0; i < 6; i++) {
+          const angle = i * Math.PI / 3;
+          const vx = x + HEX_R * Math.cos(angle);
+          const vy = y + HEX_R * Math.sin(angle);
+          if (i === 0) ctx.moveTo(vx, vy);
+          else ctx.lineTo(vx, vy);
+        }
+        ctx.closePath();
+      }
+    }
+    ctx.stroke();
+    // Vertex nodes — small glowing dots at each hex CENTER for tech-mesh feel
+    ctx.fillStyle = `rgba(125, 211, 252, ${0.45 * breathe})`;
+    const nodeR = 1.6 / zoom;
+    for (let col = startCol; col <= endCol; col++) {
+      const colOffsetY = (col & 1) ? HEX_DY / 2 : 0;
+      for (let row = startRow; row <= endRow; row++) {
+        const wx = col * HEX_DX;
+        const wy = row * HEX_DY + colOffsetY;
+        const x = wx - cx + midX;
+        const y = wy - cy + midY;
+        ctx.beginPath();
+        ctx.arc(x, y, nodeR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
   function drawBorder(cx,cy) {
     const half=MAP_SIZE/2,sx=-half-cx+canvas.width/2,sy=-half-cy+canvas.height/2;
     ctx.strokeStyle='rgba(255,60,60,0.5)'; ctx.lineWidth=4; ctx.strokeRect(sx,sy,MAP_SIZE,MAP_SIZE);
@@ -3138,7 +3220,7 @@
 
     ctx.save();
     ctx.translate(canvas.width/2,canvas.height/2);ctx.scale(zoom,zoom);ctx.translate(-canvas.width/2,-canvas.height/2);
-    drawStars(cx,cy); if(showGrid) drawGrid(cx,cy); drawBorder(cx,cy); drawRoyaleRing(cx,cy); drawFood(cx,cy); drawMegaOrbs(cx,cy);
+    drawStars(cx,cy); drawHexGrid(cx,cy); if(showGrid) drawGrid(cx,cy); drawBorder(cx,cy); drawRoyaleRing(cx,cy); drawFood(cx,cy); drawMegaOrbs(cx,cy);
     const me=snakes.find(s=>s.id===myId);
     for(const snake of snakes){if(snake.alive&&snake.id!==myId)drawSnake(snake,cx,cy);}
     if(me&&me.alive) drawSnake(me,cx,cy);
