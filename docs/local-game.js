@@ -335,14 +335,23 @@ class LocalGame {
   _kill(snake, killer) {
     if(!snake.alive) return;
     snake.alive = false;
-    const dv = Math.max(3, Math.floor(snake.score / Math.max(1, snake.segments.length / 2)));
-    for (let i=0;i<snake.segments.length;i+=2) {
-      const s=snake.segments[i];
-      const r = 10 + Math.min(snake.score/30, 12) + Math.random()*4;
-      const v = dv + Math.floor(Math.random()*3);
-      const t = r>16 ? 5 : r>12 ? 3 : 2;
-      this.food.push({x:s.x+(Math.random()-0.5)*30,y:s.y+(Math.random()-0.5)*30,
-        color:snake.color,radius:r,value:v,tier:t});
+    // Drop a chunk every 4 segments (was every 2). Cuts corpse-orb count
+    // in half so death piles don't snowball into screen-filling blobs when
+    // multiple bots die near each other.
+    const stride = 4;
+    const dropCount = Math.max(1, Math.floor(snake.segments.length / stride));
+    const totalValue = Math.max(snake.score, snake.segments.length * 2);
+    const perDrop = Math.max(4, Math.floor(totalValue / dropCount));
+    for (let i = 0; i < snake.segments.length; i += stride) {
+      const s = snake.segments[i];
+      const r = 12 + Math.min(snake.score / 25, 14) + Math.random() * 4;
+      const v = perDrop + Math.floor(Math.random() * 3);
+      const t = r > 18 ? 6 : r > 14 ? 4 : 3;
+      this.food.push({
+        x: s.x + (Math.random() - 0.5) * 36,
+        y: s.y + (Math.random() - 0.5) * 36,
+        color: snake.color, radius: r, value: v, tier: t,
+      });
     }
     if (snake.id === this.playerId && this.deathCallback) {
       this.deathCallback(snake.score);
@@ -390,35 +399,58 @@ class LocalGame {
     else this._easyAI(snake, dt);
   }
 
-  // Forward look-ahead: project a ray ahead of the snake and check whether
-  // any other snake's segment intersects within `lookAhead`. If yes, steer
-  // perpendicular to the closest threat. Returns true if it steered.
-  _steerAroundBodies(s, dangerR, lookAhead, includeOwn = false) {
+  // Multi-angle lookahead: scan 7 candidate headings (forward + ±25°, ±55°,
+  // ±90°) and find the one with the most clearance. If the forward heading
+  // is blocked within `dangerR`, steer toward the clearest open angle.
+  // Avoids the old failure mode of "turn perpendicular straight into more
+  // bodies" when surrounded.
+  _steerAroundBodies(s, dangerR, lookAhead) {
     const h = s.segments[0];
-    const px = h.x + Math.cos(s.angle) * lookAhead;
-    const py = h.y + Math.sin(s.angle) * lookAhead;
-    let closestSeg = null, closestD2 = dangerR * dangerR;
+    const OFFSETS = [0, -0.44, 0.44, -0.96, 0.96, -1.57, 1.57];
+    let forwardD2 = Infinity, bestD2 = -1, bestAngle = s.angle;
+    for (const dA of OFFSETS) {
+      const testAngle = s.angle + dA;
+      const px = h.x + Math.cos(testAngle) * lookAhead;
+      const py = h.y + Math.sin(testAngle) * lookAhead;
+      let minD2 = Infinity;
+      for (const o of this.snakes) {
+        if (!o.alive) continue;
+        const isSelf = o.id === s.id;
+        const startK = isSelf ? 8 : 1;
+        const checkLen = Math.min(o.segments.length, 50);
+        for (let k = startK; k < checkLen; k++) {
+          const seg = o.segments[k];
+          const dx = seg.x - px, dy = seg.y - py;
+          const d2 = dx*dx + dy*dy;
+          if (d2 < minD2) minD2 = d2;
+        }
+      }
+      if (dA === 0) forwardD2 = minD2;
+      // Lightly favor smaller turns by adding a comfort bonus to near-forward angles
+      const turnPenalty = Math.abs(dA) * 4000;
+      const score = minD2 - turnPenalty;
+      if (score > bestD2) { bestD2 = score; bestAngle = testAngle; }
+    }
+    if (forwardD2 < dangerR * dangerR) {
+      s.targetAngle = bestAngle;
+      return true;
+    }
+    return false;
+  }
+
+  // Cheap density check used to break off chases when too many snakes have
+  // already converged on the same area (the snowball that produces the
+  // gigantic corpse blobs).
+  _crowdedAt(x, y, radius, threshold = 3) {
+    let count = 0;
     for (const o of this.snakes) {
-      if (!o.alive) continue;
-      const isSelf = o.id === s.id;
-      if (isSelf && !includeOwn) continue;
-      const startK = isSelf ? 8 : 1; // skip the bot's own head/neck
-      const checkLen = Math.min(o.segments.length, 50);
-      for (let k = startK; k < checkLen; k++) {
-        const seg = o.segments[k];
-        const dx = seg.x - px, dy = seg.y - py;
-        const d2 = dx*dx + dy*dy;
-        if (d2 < closestD2) { closestD2 = d2; closestSeg = seg; }
+      if (!o.alive || o.segments.length === 0) continue;
+      const dx = o.segments[0].x - x, dy = o.segments[0].y - y;
+      if (dx*dx + dy*dy < radius*radius) {
+        if (++count >= threshold) return true;
       }
     }
-    if (!closestSeg) return false;
-    const aTo = Math.atan2(closestSeg.y - h.y, closestSeg.x - h.x);
-    let diff = aTo - s.angle;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    // Turn ~110° away from the threat
-    s.targetAngle = s.angle + (diff > 0 ? -1 : 1) * (Math.PI * 0.55);
-    return true;
+    return false;
   }
 
   _closestFood(s, maxR) {
@@ -508,12 +540,12 @@ class LocalGame {
         return;
       }
     }
-    // Mega orbs within 1300 units
+    // Mega orbs within 1300 units — skip if 3+ snakes already swarming there
     let bm = null, bmd2 = 1300*1300;
     for (const m of this.megaOrbs) {
       const dx = m.x - h.x, dy = m.y - h.y;
       const d2 = dx*dx + dy*dy;
-      if (d2 < bmd2) { bmd2 = d2; bm = m; }
+      if (d2 < bmd2 && !this._crowdedAt(m.x, m.y, 350, 3)) { bmd2 = d2; bm = m; }
     }
     if (bm) {
       const bmd = Math.sqrt(bmd2);
@@ -522,9 +554,9 @@ class LocalGame {
       s.boosting = bmd > 350 && bmd < 1100 && s.score > 20;
       return;
     }
-    // Value-weighted food
+    // Value-weighted food — skip if there's a dogpile at the target spot
     const f = this._bestFoodByValue(s, 900);
-    if (f) {
+    if (f && !this._crowdedAt(f.x, f.y, 250, 3)) {
       s.targetAngle = Math.atan2(f.y - h.y, f.x - h.x);
     } else {
       s.botWanderAngle += (Math.random() - 0.5) * 0.5;
@@ -553,19 +585,20 @@ class LocalGame {
       s.boosting = false;
       return;
     }
-    // Engage the human player specifically
+    // Engage the human player specifically — only if NOT in a crowded area
     const player = this.snakes.find(o => o.id === this.playerId && o.alive);
     if (player && player.segments.length > 0) {
       const ph = player.segments[0];
       const dx = ph.x - h.x, dy = ph.y - h.y;
       const d = Math.sqrt(dx*dx + dy*dy);
-      // Hunt: predict player's future position and cut them off
-      if (d < 450 && s.score >= player.score * 1.15) {
-        const lead = 0.5 + d / 400;
+      const crowdedNearPlayer = this._crowdedAt(ph.x, ph.y, 350, 3);
+      // Hunt: tighter range (320), needs clear lane, real size advantage
+      if (d < 320 && s.score >= player.score * 1.25 && !crowdedNearPlayer) {
+        const lead = 0.4 + d / 450;
         const px = ph.x + Math.cos(player.angle) * this.SNAKE_SPEED * lead;
         const py = ph.y + Math.sin(player.angle) * this.SNAKE_SPEED * lead;
         s.targetAngle = Math.atan2(py - h.y, px - h.x);
-        s.boosting = d > 140 && d < 360 && s.score > 25;
+        s.boosting = d > 150 && d < 280 && s.score > 30;
         return;
       }
       // Flee: get well clear before continuing
@@ -575,12 +608,12 @@ class LocalGame {
         return;
       }
     }
-    // Mega orbs anywhere within 1800
+    // Mega orbs — skip if dogpile is already on them
     let bm = null, bmd2 = 1800*1800;
     for (const m of this.megaOrbs) {
       const dx = m.x - h.x, dy = m.y - h.y;
       const d2 = dx*dx + dy*dy;
-      if (d2 < bmd2) { bmd2 = d2; bm = m; }
+      if (d2 < bmd2 && !this._crowdedAt(m.x, m.y, 350, 3)) { bmd2 = d2; bm = m; }
     }
     if (bm) {
       const bmd = Math.sqrt(bmd2);
@@ -589,30 +622,31 @@ class LocalGame {
       s.boosting = bmd > 300 && bmd < 1400 && s.score > 18;
       return;
     }
-    // Hunt smaller bots with cut-off
-    let bp = null, bpd2 = 700*700;
+    // Hunt smaller bots — only chase if the kill zone is clear
+    let bp = null, bpd2 = 600*600;
     for (const o of this.snakes) {
       if (o.id === s.id || o.id === this.playerId || !o.alive) continue;
-      if (o.score >= s.score * 0.65) continue;
+      if (o.score >= s.score * 0.55) continue;
       const dx = o.segments[0].x - h.x, dy = o.segments[0].y - h.y;
       const d2 = dx*dx + dy*dy;
-      if (d2 < bpd2) { bpd2 = d2; bp = o; }
+      if (d2 < bpd2 && !this._crowdedAt(o.segments[0].x, o.segments[0].y, 280, 2)) {
+        bpd2 = d2; bp = o;
+      }
     }
     if (bp) {
       const bpd = Math.sqrt(bpd2);
-      const lead = 0.6 + bpd / 280;
+      const lead = 0.5 + bpd / 320;
       const px = bp.segments[0].x + Math.cos(bp.angle) * this.SNAKE_SPEED * lead;
       const py = bp.segments[0].y + Math.sin(bp.angle) * this.SNAKE_SPEED * lead;
       s.targetAngle = Math.atan2(py - h.y, px - h.x);
-      s.boosting = bpd > 180 && bpd < 550 && s.score > 30;
+      s.boosting = bpd > 180 && bpd < 450 && s.score > 30;
       return;
     }
-    // Death-pile / high-value food
+    // Death-pile / high-value food — but skip if the area is a dogpile already
     const bf = this._bestFoodByValue(s, 1300);
-    if (bf) {
+    if (bf && !this._crowdedAt(bf.x, bf.y, 280, 3)) {
       s.targetAngle = Math.atan2(bf.y - h.y, bf.x - h.x);
-      // Light boost toward fat clusters when comfortable
-      s.boosting = (bf.value || 1) >= 8 && s.score > 30 && Math.random() < 0.2;
+      s.boosting = (bf.value || 1) >= 10 && s.score > 40 && Math.random() < 0.15;
       return;
     }
     s.botWanderAngle += (Math.random() - 0.5) * 0.3;
