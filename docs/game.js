@@ -2070,7 +2070,9 @@
       }
     }
 
-    // Phase pill (top-center, moderate size — readable without dominating)
+    // Phase status panel — circular time-progress ring on the left, panel-card
+    // styling that matches the rest of the app (rounded, subtle gradient bg,
+    // teal/red accent based on state).
     ctx.save();
     const isShrink = st.state === 'shrink';
     const isDone = st.state === 'done';
@@ -2080,49 +2082,77 @@
       : isShrink
         ? 'ZONE CLOSING'
         : `PHASE ${st.phaseIdx + 1}/${st.totalPhases}`;
-    const timeLabel = isDone ? '' : `${Math.ceil(st.timeRemaining)}s`;
-    ctx.font = "800 13px 'Space Grotesk', 'Inter', sans-serif";
-    const stateW = ctx.measureText(stateLabel).width;
-    ctx.font = "800 15px 'Space Grotesk', 'Inter', sans-serif";
-    const timeW = timeLabel ? ctx.measureText(timeLabel).width : 0;
+    const timeLabel = isDone ? '∞' : `${Math.ceil(st.timeRemaining)}`;
     const aliveTxt = `${st.alive} ALIVE`;
+
+    // Pre-measure for centering
     ctx.font = "700 11px 'Inter', sans-serif";
+    const stateW = ctx.measureText(stateLabel).width;
     const aliveW = ctx.measureText(aliveTxt).width;
-    const pillW = Math.max(220, stateW + timeW + aliveW + 88);
-    const pillH = 30;
-    ctx.fillStyle = 'rgba(10,12,28,0.85)';
-    ctx.strokeStyle = accent;
-    ctx.globalAlpha = 0.9;
-    roundRect(ctx, W/2 - pillW/2, 12, pillW, pillH, 14);
+    const ringD = 36;
+    const pad = 14;
+    const gap = 10;
+    const pillW = Math.max(260, ringD + gap + stateW + 14 + aliveW + pad * 2);
+    const pillH = 56;
+    const px = W/2 - pillW/2;
+    const py = 14;
+
+    // Panel-card background: matches app's frosted-card aesthetic.
+    const bgGrad = ctx.createLinearGradient(0, py, 0, py + pillH);
+    bgGrad.addColorStop(0, 'rgba(20, 24, 48, 0.92)');
+    bgGrad.addColorStop(1, 'rgba(10, 12, 28, 0.92)');
+    ctx.fillStyle = bgGrad;
+    roundRect(ctx, px, py, pillW, pillH, pillH / 2); // fully rounded ends
     ctx.fill();
-    ctx.globalAlpha = 1;
+    // Subtle border
+    ctx.strokeStyle = `${accent}aa`;
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    // Left accent bar
-    ctx.fillStyle = accent;
-    ctx.fillRect(W/2 - pillW/2 + 1, 14, 3, pillH - 4);
-    // Layout: state | time | divider | alive
-    let x = W/2 - pillW/2 + 18;
-    const cy = 12 + pillH/2 + 1;
-    ctx.textAlign = 'left';
+    // Inner highlight (top edge)
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    roundRect(ctx, px + 1.5, py + 1.5, pillW - 3, pillH - 3, (pillH - 3) / 2);
+    ctx.stroke();
+
+    // Circular time-progress ring (left side of panel)
+    const ringCX = px + pad + ringD / 2;
+    const ringCY = py + pillH / 2;
+    const ringR = ringD / 2;
+    // Track
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.arc(ringCX, ringCY, ringR, 0, Math.PI * 2);
+    ctx.stroke();
+    // Progress arc
+    const phaseTotal = isShrink
+      ? (localGame.ROYALE_PHASES[st.phaseIdx] && localGame.ROYALE_PHASES[st.phaseIdx].shrinkTime) || 1
+      : (localGame.ROYALE_PHASES[st.phaseIdx] && localGame.ROYALE_PHASES[st.phaseIdx].hold) || 1;
+    const progress = isDone ? 1 : Math.max(0, Math.min(1, st.timeRemaining / phaseTotal));
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(ringCX, ringCY, ringR, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    // Time number inside the ring
+    ctx.font = "800 14px 'Space Grotesk', 'Inter', sans-serif";
+    ctx.fillStyle = '#f8fafc';
+    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = "800 13px 'Space Grotesk', 'Inter', sans-serif";
+    ctx.fillText(timeLabel, ringCX, ringCY + 1);
+
+    // Right side: state label on top, alive count below
+    const textX = ringCX + ringD / 2 + gap;
+    ctx.textAlign = 'left';
+    ctx.font = "800 12px 'Space Grotesk', 'Inter', sans-serif";
     ctx.fillStyle = accent;
-    ctx.fillText(stateLabel, x, cy);
-    x += stateW + 10;
-    if (timeLabel) {
-      ctx.font = "800 15px 'Space Grotesk', 'Inter', sans-serif";
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillText(timeLabel, x, cy);
-      x += timeW + 12;
-    }
-    // Divider
-    ctx.fillStyle = 'rgba(148,163,184,0.35)';
-    ctx.fillRect(x, 18, 1, pillH - 12);
-    x += 10;
-    ctx.font = "700 11px 'Inter', sans-serif";
+    ctx.fillText(stateLabel, textX, ringCY - 8);
+    ctx.font = "600 10px 'Inter', sans-serif";
     ctx.fillStyle = 'rgba(148,163,184,0.95)';
-    ctx.fillText(aliveTxt, x, cy);
+    ctx.fillText(aliveTxt, textX, ringCY + 9);
+
     ctx.textBaseline = 'alphabetic';
     ctx.restore();
 
@@ -2382,7 +2412,8 @@
     for(const f of food){
       const sx=f.x-cx+midX,sy=f.y-cy+midY;
       if(sx<midX-halfW||sx>midX+halfW||sy<midY-halfH||sy>midY+halfH) continue;
-      const tier=f.tier||0,pulse=0.9+0.1*Math.sin(animTime*3+f.x*0.01);
+      const tier=f.tier||0;
+      const pulse=0.93+0.07*Math.sin(animTime*3+f.x*0.01);
       let spawnScale = 1;
       if (f.spawnTime !== undefined && animTime - f.spawnTime < 0.3) {
         const t = animTime - f.spawnTime;
@@ -2391,8 +2422,32 @@
       }
       const r=f.radius*pulse*spawnScale;
       const color=COLORS[f.color]||COLORS[0];
-      if(tier>=4){ctx.fillStyle=color;ctx.globalAlpha=0.12;ctx.beginPath();ctx.arc(sx,sy,r*2,0,Math.PI*2);ctx.fill();}
-      ctx.fillStyle=color;ctx.globalAlpha=0.9;ctx.beginPath();ctx.arc(sx,sy,r,0,Math.PI*2);ctx.fill();
+      const colorFull=hexFull(color);
+      // Outer glow halo — pulses gently, brighter for higher tiers
+      const haloR = r * (tier >= 4 ? 3.2 : tier >= 2 ? 2.4 : 1.9);
+      const haloAlpha = tier >= 4 ? 0.30 : tier >= 2 ? 0.22 : 0.16;
+      const halo = ctx.createRadialGradient(sx, sy, r * 0.6, sx, sy, haloR);
+      halo.addColorStop(0, colorFull + Math.floor(haloAlpha * 255).toString(16).padStart(2, '0'));
+      halo.addColorStop(1, colorFull + '00');
+      ctx.fillStyle = halo;
+      ctx.beginPath(); ctx.arc(sx, sy, haloR, 0, Math.PI * 2); ctx.fill();
+      // Core orb — radial gradient (bright center → saturated rim)
+      const core = ctx.createRadialGradient(sx - r*0.35, sy - r*0.35, r * 0.05, sx, sy, r);
+      core.addColorStop(0, '#ffffff');
+      core.addColorStop(0.35, colorFull + 'ee');
+      core.addColorStop(1, colorFull);
+      ctx.fillStyle = core;
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
+      // Crisp specular highlight (top-left)
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(sx - r * 0.35, sy - r * 0.4, r * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+      // Soft secondary highlight (bottom rim glow)
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.beginPath();
+      ctx.arc(sx + r * 0.15, sy + r * 0.35, r * 0.18, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.globalAlpha=1;
   }
@@ -2480,7 +2535,10 @@
       for (let i = ss.length - 2; i >= 0; i--) ctx.lineTo(ss[i].x, ss[i].y);
       ctx.stroke();
     }
-    // Per-segment colored band so multi-color skins still pattern correctly
+    // Per-segment SMOOTH curves so turns don't show as kinked polyline corners.
+    // Each segment renders as a quadratic Bezier from the previous midpoint
+    // through ss[i] to the next midpoint — adjacent segments share endpoints
+    // so the entire body draws as one continuous smooth curve.
     ctx.globalAlpha = 0.98;
     for (let i = ss.length - 1; i >= 1; i--) {
       const a = ss[i], b = ss[i-1];
@@ -2493,9 +2551,20 @@
       if (score >= 2000) w *= 1 + 0.04 * Math.sin(animTime * 4 + i * 0.3);
       ctx.lineWidth = w;
       ctx.strokeStyle = getSegColor(snake, i);
+      // Start at midpoint to the tail-ward neighbor, end at midpoint to the
+      // head-ward neighbor, with the segment itself as the control point.
+      const aNext = ss[i + 1]; // may be undefined for the very tail
+      const bPrev = ss[i - 2]; // may be undefined approaching the head
+      const sx = aNext ? (a.x + aNext.x) * 0.5 : a.x;
+      const sy = aNext ? (a.y + aNext.y) * 0.5 : a.y;
+      const ex = bPrev ? (b.x + bPrev.x) * 0.5 : b.x;
+      const ey = bPrev ? (b.y + bPrev.y) * 0.5 : b.y;
+      const mABx = (a.x + b.x) * 0.5;
+      const mABy = (a.y + b.y) * 0.5;
       ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
+      ctx.moveTo(sx, sy);
+      ctx.quadraticCurveTo(a.x, a.y, mABx, mABy);
+      ctx.quadraticCurveTo(b.x, b.y, ex, ey);
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
