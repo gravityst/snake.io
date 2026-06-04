@@ -183,26 +183,41 @@
     if (accId <= 0 || accId >= ACC_EMOJI.length) return;
     const entry = ACC_EMOJI[accId];
     if (!entry) {
-      // No safe emoji — fall through to canvas-painted version.
       return _legacyDrawAccessory(ctx, accId, hx, hy, headR, angle);
     }
     const [emoji, kind] = entry;
-    const size = headR * (kind === 'face' ? 1.7 : 2.4);
-    // Rotate with the snake's head so the accessory sits on TOP of the head
-    // (matches the painted-accessory convention; otherwise glyphs render
-    // "sideways" relative to the head when the snake turns).
     ctx.save();
     ctx.translate(hx, hy);
-    ctx.rotate(angle - Math.PI / 2);
-    const offsetY = kind === 'crown' ? -headR * 1.30 : 0;
-    ctx.font = `${size}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0,0,0,0.55)';
-    ctx.shadowBlur = Math.max(4, headR * 0.35);
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = Math.max(1, headR * 0.08);
-    ctx.fillText(emoji, 0, offsetY);
+    if (kind === 'crown') {
+      // Hat / crown: rotate so the glyph's "up" matches the snake's
+      // perpendicular-to-facing direction, sit it above the head.
+      ctx.rotate(angle - Math.PI / 2);
+      const size = headR * 2.4;
+      ctx.font = `${size}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.55)';
+      ctx.shadowBlur = Math.max(4, headR * 0.35);
+      ctx.shadowOffsetY = Math.max(1, headR * 0.08);
+      ctx.fillText(emoji, 0, -headR * 1.30);
+    } else {
+      // Face items (sunglasses, headphones, goggles): the glyph's natural
+      // left-right axis should align with the snake's left-right axis
+      // (perpendicular to facing). Rotating by `angle` makes the glyph's
+      // "up" point in the direction of motion, which puts the lenses /
+      // ear-cups across the face — exactly where you'd wear them.
+      // Position slightly forward toward the eyes for a worn-on-face look.
+      ctx.rotate(angle);
+      const size = headR * 2.2; // bumped from 1.7 — was reading as a tooth
+      ctx.font = `${size}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.55)';
+      ctx.shadowBlur = Math.max(4, headR * 0.35);
+      ctx.shadowOffsetY = Math.max(1, headR * 0.08);
+      // Forward offset puts it on the face, not the neck
+      ctx.fillText(emoji, headR * 0.15, 0);
+    }
     ctx.restore();
   }
 
@@ -931,29 +946,41 @@
     spCtx.fillRect(0, 0, w, h);
 
     const skin = SKINS[selectedSkin] || SKINS[0];
-    const segCount = 16;
-    const spacing = 20;
+    const segCount = 22;
+    const spacing = 16;
     const hr = 14;
+    const dotR = 10;
 
     // Generate a wiggling snake path
     const segs = [];
     for (let i = 0; i < segCount; i++) {
-      const t = i / segCount;
-      const wave = Math.sin(previewAnim * 3 + i * 0.5) * 12;
+      const wave = Math.sin(previewAnim * 3 + i * 0.45) * 14;
       segs.push({
-        x: w * 0.7 - i * spacing,
-        y: h / 2 + wave
+        x: w * 0.78 - i * spacing,
+        y: h / 2 + wave,
       });
     }
 
-    // Draw body dots
+    // Smooth body — matches the in-game renderer (continuous tube via per-
+    // segment quadratic Beziers through midpoints).
+    spCtx.lineCap = 'round';
+    spCtx.lineJoin = 'round';
+    spCtx.globalAlpha = 0.98;
     for (let i = segs.length - 1; i >= 1; i--) {
-      const s = segs[i];
+      const a = segs[i], b = segs[i-1];
       const tailT = i / segs.length;
-      const r = (hr - 2) * (1 - tailT * 0.3);
-      spCtx.fillStyle = skin.colors[i % skin.colors.length];
-      spCtx.globalAlpha = 0.95;
-      spCtx.beginPath(); spCtx.arc(s.x, s.y, r, 0, Math.PI * 2); spCtx.fill();
+      const lw = dotR * 2 * (1 - tailT * 0.22);
+      spCtx.lineWidth = lw;
+      spCtx.strokeStyle = skin.colors[i % skin.colors.length];
+      const aNext = segs[i + 1];
+      const sx = aNext ? (a.x + aNext.x) * 0.5 : a.x;
+      const sy = aNext ? (a.y + aNext.y) * 0.5 : a.y;
+      const ex = (a.x + b.x) * 0.5;
+      const ey = (a.y + b.y) * 0.5;
+      spCtx.beginPath();
+      spCtx.moveTo(sx, sy);
+      spCtx.quadraticCurveTo(a.x, a.y, ex, ey);
+      spCtx.stroke();
     }
     spCtx.globalAlpha = 1;
 
