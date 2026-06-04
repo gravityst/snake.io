@@ -227,7 +227,9 @@
     ctx.save();
     ctx.translate(hx, hy);
     ctx.rotate(angle - Math.PI/2); // rotate so "up" is away from movement direction
-    const r = headR;
+    // Scale painted accessories up — they were rendering as small cluttered
+    // blobs because the emoji renderer uses ~2.4×headR while paint used 1×.
+    const r = headR * 1.5;
 
     if (accId === 1) { // Crown — 3D gold with jewels
       // Soft drop shadow
