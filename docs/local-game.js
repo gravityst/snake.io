@@ -120,9 +120,9 @@ class LocalGame {
 
   _randomSkill() {
     const r = Math.random();
-    if (r < 0.05) return 2;
-    if (r < 0.30) return 1;
-    return 0;
+    if (r < 0.20) return 2;  // 20% hard
+    if (r < 0.60) return 1;  // 40% medium
+    return 0;                 // 40% easy
   }
 
   _createSnake(name, isBot, skinIdx, skill) {
@@ -378,84 +378,245 @@ class LocalGame {
     return false;
   }
 
-  // --- Bot AI ---
+  // ============================================================
+  // Bot AI — three tiers, each smarter than the last.
+  //
+  // Shared helpers: forward-lookahead body avoidance (so bots don't
+  // walk into walls of body), closest-food / best-value-food search.
+  // ============================================================
   _botAI(snake, dt) {
-    if (snake.skill===2) this._advAI(snake,dt);
-    else if (snake.skill===1) this._amtAI(snake,dt);
-    else this._begAI(snake,dt);
+    if (snake.skill === 2) this._hardAI(snake, dt);
+    else if (snake.skill === 1) this._mediumAI(snake, dt);
+    else this._easyAI(snake, dt);
   }
 
-  _begAI(s,dt) {
-    s.botTimer-=dt; if(s.botTimer>0) return; s.botTimer=0.5+Math.random()*0.6;
-    const h=s.segments[0], wall=this.MAP_SIZE/2-250;
-    if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=false;return;}
-    if(this._fleeShrinkZone(s)) return;
-    // Basic threat avoidance — don't blindly crash into other snakes
-    for(const o of this.snakes){
-      if(o.id===s.id||!o.alive)continue;
-      for(let k=0;k<Math.min(o.segments.length,20);k+=2){
-        const dx=o.segments[k].x-h.x,dy=o.segments[k].y-h.y;
-        const d=Math.sqrt(dx*dx+dy*dy);
-        if(d<100){
-          const aTo=Math.atan2(dy,dx);let diff=aTo-s.angle;while(diff>Math.PI)diff-=Math.PI*2;while(diff<-Math.PI)diff+=Math.PI*2;
-          if(Math.abs(diff)<Math.PI/2){s.targetAngle=s.angle+(diff>0?-1:1)*Math.PI/2;s.boosting=false;return;}
-        }
+  // Forward look-ahead: project a ray ahead of the snake and check whether
+  // any other snake's segment intersects within `lookAhead`. If yes, steer
+  // perpendicular to the closest threat. Returns true if it steered.
+  _steerAroundBodies(s, dangerR, lookAhead, includeOwn = false) {
+    const h = s.segments[0];
+    const px = h.x + Math.cos(s.angle) * lookAhead;
+    const py = h.y + Math.sin(s.angle) * lookAhead;
+    let closestSeg = null, closestD2 = dangerR * dangerR;
+    for (const o of this.snakes) {
+      if (!o.alive) continue;
+      const isSelf = o.id === s.id;
+      if (isSelf && !includeOwn) continue;
+      const startK = isSelf ? 8 : 1; // skip the bot's own head/neck
+      const checkLen = Math.min(o.segments.length, 50);
+      for (let k = startK; k < checkLen; k++) {
+        const seg = o.segments[k];
+        const dx = seg.x - px, dy = seg.y - py;
+        const d2 = dx*dx + dy*dy;
+        if (d2 < closestD2) { closestD2 = d2; closestSeg = seg; }
       }
     }
-    if(Math.random()<0.15){s.botWanderAngle+=(Math.random()-0.5)*2;s.targetAngle=s.botWanderAngle;s.boosting=false;return;}
-    let cl=null,cSq=300*300;
-    for(const f of this.food){const dx=f.x-h.x;if(dx>300||dx<-300)continue;const dy=f.y-h.y;if(dy>300||dy<-300)continue;const d2=dx*dx+dy*dy;if(d2<cSq){cSq=d2;cl=f;}}
-    if(cl)s.targetAngle=Math.atan2(cl.y-h.y,cl.x-h.x);
-    else{s.botWanderAngle+=(Math.random()-0.5)*1.5;s.targetAngle=s.botWanderAngle;}
-    s.boosting=false;
+    if (!closestSeg) return false;
+    const aTo = Math.atan2(closestSeg.y - h.y, closestSeg.x - h.x);
+    let diff = aTo - s.angle;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    // Turn ~110° away from the threat
+    s.targetAngle = s.angle + (diff > 0 ? -1 : 1) * (Math.PI * 0.55);
+    return true;
   }
 
-  _amtAI(s,dt) {
-    s.botTimer-=dt; if(s.botTimer>0) return; s.botTimer=0.3+Math.random()*0.4;
-    const h=s.segments[0], wall=this.MAP_SIZE/2-250;
-    if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=true;return;}
-    if(this._fleeShrinkZone(s)) return;
-    let cl=null,cSq=450*450;
-    for(const f of this.food){const dx=f.x-h.x;if(dx>450||dx<-450)continue;const dy=f.y-h.y;if(dy>450||dy<-450)continue;const d2=dx*dx+dy*dy;if(d2<cSq){cSq=d2;cl=f;}}
-    for(const o of this.snakes){
-      if(o.id===s.id||!o.alive)continue;
-      const dx=o.segments[0].x-h.x,dy=o.segments[0].y-h.y,d=Math.sqrt(dx*dx+dy*dy);
-      if(d<180){s.targetAngle=Math.atan2(-dy,-dx)+(Math.random()-0.5)*0.5;s.boosting=d<90;return;}
+  _closestFood(s, maxR) {
+    const h = s.segments[0];
+    let best = null, bd2 = maxR * maxR;
+    for (const f of this.food) {
+      const dx = f.x - h.x, dy = f.y - h.y;
+      if (dx > maxR || dx < -maxR || dy > maxR || dy < -maxR) continue;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bd2) { bd2 = d2; best = f; }
     }
-    if(cl){s.targetAngle=Math.atan2(cl.y-h.y,cl.x-h.x);s.boosting=false;}
-    else{s.botWanderAngle+=(Math.random()-0.5)*1.2;s.targetAngle=s.botWanderAngle;s.boosting=false;}
+    return best;
   }
 
-  _advAI(s,dt) {
-    s.botTimer-=dt; if(s.botTimer>0) return; s.botTimer=0.08;
-    const h=s.segments[0], wall=this.MAP_SIZE/2-250;
-    if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=false;return;}
-    if(this._fleeShrinkZone(s)) return;
-    // Avoid body segments ahead
-    for(const o of this.snakes){
-      if(o.id===s.id||!o.alive)continue;
-      for(let k=0;k<Math.min(o.segments.length,30);k+=2){
-        const dx=o.segments[k].x-h.x,dy=o.segments[k].y-h.y,d=Math.sqrt(dx*dx+dy*dy);
-        if(d<80){const aTo=Math.atan2(dy,dx);let diff=aTo-s.angle;while(diff>Math.PI)diff-=Math.PI*2;while(diff<-Math.PI)diff+=Math.PI*2;
-          if(Math.abs(diff)<Math.PI/3){s.targetAngle=s.angle+(diff>0?-1:1)*Math.PI/2.5;s.boosting=false;return;}}
+  // Value-weighted food search: ratio = value / (distance + 40).
+  // Prefers fat tier-5+ corpses over scattered tier-0 dots even at distance.
+  _bestFoodByValue(s, maxR) {
+    const h = s.segments[0];
+    let best = null, bestRatio = 0;
+    for (const f of this.food) {
+      const dx = f.x - h.x, dy = f.y - h.y;
+      if (dx > maxR || dx < -maxR || dy > maxR || dy < -maxR) continue;
+      const d = Math.sqrt(dx*dx + dy*dy) + 40;
+      const ratio = (f.value || 1) / d;
+      if (ratio > bestRatio) { bestRatio = ratio; best = f; }
+    }
+    return best;
+  }
+
+  // EASY — wanders gently but actively seeks nearby food and avoids
+  // body collisions in its path. Slow reaction (~0.18s ticks). No boost.
+  _easyAI(s, dt) {
+    s.botTimer -= dt;
+    if (s.botTimer > 0) return;
+    s.botTimer = 0.15 + Math.random() * 0.12;
+    const h = s.segments[0];
+    const wall = this.MAP_SIZE / 2 - 250;
+    if (Math.abs(h.x) > wall || Math.abs(h.y) > wall) {
+      s.targetAngle = Math.atan2(-h.y, -h.x);
+      s.boosting = false;
+      return;
+    }
+    if (this._fleeShrinkZone(s)) return;
+    // Lookahead body avoidance — generous danger zone since they react slow
+    if (this._steerAroundBodies(s, 95, 170)) {
+      s.boosting = false;
+      return;
+    }
+    // Nearest food up to 700 units
+    const f = this._closestFood(s, 700);
+    if (f) {
+      s.targetAngle = Math.atan2(f.y - h.y, f.x - h.x);
+    } else {
+      s.botWanderAngle += (Math.random() - 0.5) * 0.6;
+      s.targetAngle = s.botWanderAngle;
+    }
+    s.boosting = false;
+  }
+
+  // MEDIUM — value-weighted food search, head-on collision avoidance,
+  // grabs mega orbs in range, will boost away from threats. Reacts in ~0.1s.
+  _mediumAI(s, dt) {
+    s.botTimer -= dt;
+    if (s.botTimer > 0) return;
+    s.botTimer = 0.09 + Math.random() * 0.06;
+    const h = s.segments[0];
+    const wall = this.MAP_SIZE / 2 - 250;
+    if (Math.abs(h.x) > wall || Math.abs(h.y) > wall) {
+      s.targetAngle = Math.atan2(-h.y, -h.x);
+      s.boosting = false;
+      return;
+    }
+    if (this._fleeShrinkZone(s)) return;
+    // Body lookahead — tighter sense, sees further ahead
+    if (this._steerAroundBodies(s, 110, 220)) {
+      s.boosting = false;
+      return;
+    }
+    // Flee bigger snake heads within 280 units
+    for (const o of this.snakes) {
+      if (o.id === s.id || !o.alive) continue;
+      const dx = o.segments[0].x - h.x, dy = o.segments[0].y - h.y;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < 280*280 && o.score >= s.score * 0.85) {
+        s.targetAngle = Math.atan2(-dy, -dx) + (Math.random() - 0.5) * 0.4;
+        s.boosting = d2 < 160*160 && s.score > 12;
+        return;
       }
     }
-    // Flee from bigger
-    for(const o of this.snakes){if(o.id===s.id||!o.alive)continue;const dx=o.segments[0].x-h.x,dy=o.segments[0].y-h.y,d=Math.sqrt(dx*dx+dy*dy);
-      if(d<250&&o.score>=s.score*0.8){s.targetAngle=Math.atan2(-dy,-dx)+(Math.random()<0.5?-0.4:0.4);s.boosting=d<150&&s.score>25;return;}}
-    // Mega orbs
-    let bm=null,bmd=2000;
-    for(const m of this.megaOrbs){const d=Math.sqrt((m.x-h.x)**2+(m.y-h.y)**2);if(d<bmd){bmd=d;bm=m;}}
-    if(bm){const t=bmd/this.SNAKE_SPEED;s.targetAngle=Math.atan2(bm.y+bm.vy*t-h.y,bm.x+bm.vx*t-h.x);s.boosting=bmd>400&&bmd<1200&&s.score>15;return;}
-    // Hunt smaller with cut-off
-    let bp=null,bpd=900;
-    for(const o of this.snakes){if(o.id===s.id||!o.alive||o.score>=s.score*0.6)continue;const d=Math.sqrt((o.segments[0].x-h.x)**2+(o.segments[0].y-h.y)**2);if(d<bpd){bpd=d;bp=o;}}
-    if(bp){const la=0.6+bpd/300;const px=bp.segments[0].x+Math.cos(bp.angle)*this.SNAKE_SPEED*la;const py=bp.segments[0].y+Math.sin(bp.angle)*this.SNAKE_SPEED*la;
-      s.targetAngle=Math.atan2(py-h.y,px-h.x);s.boosting=bpd>200&&bpd<600&&s.score>30;return;}
-    // High-value food
-    let bf=null,br=0;
-    for(const f of this.food){const dx=f.x-h.x;if(dx>1000||dx<-1000)continue;const dy=f.y-h.y;if(dy>1000||dy<-1000)continue;const ratio=(f.value||1)/(Math.sqrt(dx*dx+dy*dy)+40);if(ratio>br){br=ratio;bf=f;}}
-    if(bf){s.targetAngle=Math.atan2(bf.y-h.y,bf.x-h.x);s.boosting=false;return;}
-    s.botWanderAngle+=(Math.random()-0.5)*0.4;s.targetAngle=s.botWanderAngle;s.boosting=false;
+    // Mega orbs within 1300 units
+    let bm = null, bmd2 = 1300*1300;
+    for (const m of this.megaOrbs) {
+      const dx = m.x - h.x, dy = m.y - h.y;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bmd2) { bmd2 = d2; bm = m; }
+    }
+    if (bm) {
+      const bmd = Math.sqrt(bmd2);
+      const t = bmd / this.SNAKE_SPEED;
+      s.targetAngle = Math.atan2(bm.y + bm.vy*t - h.y, bm.x + bm.vx*t - h.x);
+      s.boosting = bmd > 350 && bmd < 1100 && s.score > 20;
+      return;
+    }
+    // Value-weighted food
+    const f = this._bestFoodByValue(s, 900);
+    if (f) {
+      s.targetAngle = Math.atan2(f.y - h.y, f.x - h.x);
+    } else {
+      s.botWanderAngle += (Math.random() - 0.5) * 0.5;
+      s.targetAngle = s.botWanderAngle;
+    }
+    s.boosting = false;
+  }
+
+  // HARD — predicts player position, hunts when bigger, flees when smaller,
+  // grabs mega orbs and death piles aggressively, cuts off smaller bots.
+  // Reacts every frame (~0.05s) for the smoothest decisions.
+  _hardAI(s, dt) {
+    s.botTimer -= dt;
+    if (s.botTimer > 0) return;
+    s.botTimer = 0.05;
+    const h = s.segments[0];
+    const wall = this.MAP_SIZE / 2 - 250;
+    if (Math.abs(h.x) > wall || Math.abs(h.y) > wall) {
+      s.targetAngle = Math.atan2(-h.y, -h.x);
+      s.boosting = false;
+      return;
+    }
+    if (this._fleeShrinkZone(s)) return;
+    // Heaviest body lookahead — far-sighted
+    if (this._steerAroundBodies(s, 125, 260)) {
+      s.boosting = false;
+      return;
+    }
+    // Engage the human player specifically
+    const player = this.snakes.find(o => o.id === this.playerId && o.alive);
+    if (player && player.segments.length > 0) {
+      const ph = player.segments[0];
+      const dx = ph.x - h.x, dy = ph.y - h.y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      // Hunt: predict player's future position and cut them off
+      if (d < 450 && s.score >= player.score * 1.15) {
+        const lead = 0.5 + d / 400;
+        const px = ph.x + Math.cos(player.angle) * this.SNAKE_SPEED * lead;
+        const py = ph.y + Math.sin(player.angle) * this.SNAKE_SPEED * lead;
+        s.targetAngle = Math.atan2(py - h.y, px - h.x);
+        s.boosting = d > 140 && d < 360 && s.score > 25;
+        return;
+      }
+      // Flee: get well clear before continuing
+      if (d < 320 && s.score < player.score * 0.7) {
+        s.targetAngle = Math.atan2(-dy, -dx) + (Math.random() < 0.5 ? -0.5 : 0.5);
+        s.boosting = d < 200 && s.score > 12;
+        return;
+      }
+    }
+    // Mega orbs anywhere within 1800
+    let bm = null, bmd2 = 1800*1800;
+    for (const m of this.megaOrbs) {
+      const dx = m.x - h.x, dy = m.y - h.y;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bmd2) { bmd2 = d2; bm = m; }
+    }
+    if (bm) {
+      const bmd = Math.sqrt(bmd2);
+      const t = bmd / this.SNAKE_SPEED;
+      s.targetAngle = Math.atan2(bm.y + bm.vy*t - h.y, bm.x + bm.vx*t - h.x);
+      s.boosting = bmd > 300 && bmd < 1400 && s.score > 18;
+      return;
+    }
+    // Hunt smaller bots with cut-off
+    let bp = null, bpd2 = 700*700;
+    for (const o of this.snakes) {
+      if (o.id === s.id || o.id === this.playerId || !o.alive) continue;
+      if (o.score >= s.score * 0.65) continue;
+      const dx = o.segments[0].x - h.x, dy = o.segments[0].y - h.y;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bpd2) { bpd2 = d2; bp = o; }
+    }
+    if (bp) {
+      const bpd = Math.sqrt(bpd2);
+      const lead = 0.6 + bpd / 280;
+      const px = bp.segments[0].x + Math.cos(bp.angle) * this.SNAKE_SPEED * lead;
+      const py = bp.segments[0].y + Math.sin(bp.angle) * this.SNAKE_SPEED * lead;
+      s.targetAngle = Math.atan2(py - h.y, px - h.x);
+      s.boosting = bpd > 180 && bpd < 550 && s.score > 30;
+      return;
+    }
+    // Death-pile / high-value food
+    const bf = this._bestFoodByValue(s, 1300);
+    if (bf) {
+      s.targetAngle = Math.atan2(bf.y - h.y, bf.x - h.x);
+      // Light boost toward fat clusters when comfortable
+      s.boosting = (bf.value || 1) >= 8 && s.score > 30 && Math.random() < 0.2;
+      return;
+    }
+    s.botWanderAngle += (Math.random() - 0.5) * 0.3;
+    s.targetAngle = s.botWanderAngle;
+    s.boosting = false;
   }
 }

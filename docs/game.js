@@ -1128,7 +1128,7 @@
     let entry = foodSpriteCache.get(key);
     if (entry) return entry;
     const r = sizeKey;
-    const pad = Math.ceil(r * 1.5);
+    const pad = Math.ceil(r * 1.6);
     const size = (r + pad) * 2;
     const off = document.createElement('canvas');
     off.width = off.height = size;
@@ -1136,57 +1136,30 @@
     const cx = size / 2, cy = size / 2;
     const color = COLORS[colorIdx] || COLORS[0];
     const colorFull = hexFull(color);
-    const colorLight = lighten(colorFull, 0.45);
-    const colorDark = darken(colorFull, 0.40);
 
-    // Outer halo glow — bigger and softer for higher tiers
+    // Slither.io-style: bright glow halo around a flat saturated core.
+    // No drop shadow, no rim ring, no harsh gradients — just light.
     const haloR = r + pad;
-    const haloA = tier >= 6 ? 0.42 : tier >= 4 ? 0.32 : tier >= 2 ? 0.22 : 0.14;
-    const halo = fc.createRadialGradient(cx, cy, r * 0.4, cx, cy, haloR);
+    const haloA = tier >= 6 ? 0.55 : tier >= 4 ? 0.42 : tier >= 2 ? 0.30 : 0.22;
+    const halo = fc.createRadialGradient(cx, cy, r * 0.75, cx, cy, haloR);
     halo.addColorStop(0, colorFull + Math.floor(haloA * 255).toString(16).padStart(2, '0'));
-    halo.addColorStop(0.55, colorFull + Math.floor(haloA * 0.4 * 255).toString(16).padStart(2, '0'));
     halo.addColorStop(1, colorFull + '00');
     fc.fillStyle = halo;
     fc.beginPath(); fc.arc(cx, cy, haloR, 0, Math.PI * 2); fc.fill();
 
-    // Drop shadow under the orb (depth)
-    const shadow = fc.createRadialGradient(cx, cy + r * 0.15, r * 0.4, cx, cy + r * 0.15, r * 1.05);
-    shadow.addColorStop(0, 'rgba(0,0,0,0.32)');
-    shadow.addColorStop(1, 'rgba(0,0,0,0)');
-    fc.fillStyle = shadow;
-    fc.beginPath(); fc.arc(cx, cy + r * 0.15, r * 1.05, 0, Math.PI * 2); fc.fill();
-
-    // Core orb — clean radial gradient (light top-left → mid color → dark rim)
-    const core = fc.createRadialGradient(cx - r * 0.3, cy - r * 0.32, r * 0.08, cx + r * 0.1, cy + r * 0.15, r * 1.05);
-    core.addColorStop(0, colorLight);
-    core.addColorStop(0.45, colorFull);
-    core.addColorStop(1, colorDark);
-    fc.fillStyle = core;
+    // Flat colored core — clean and saturated, no inner gradient
+    fc.fillStyle = colorFull;
     fc.beginPath(); fc.arc(cx, cy, r, 0, Math.PI * 2); fc.fill();
 
-    // Thin top rim highlight — like light catching a glass orb
-    fc.strokeStyle = 'rgba(255,255,255,0.55)';
-    fc.lineWidth = Math.max(0.6, r * 0.08);
-    fc.beginPath();
-    fc.arc(cx, cy, r - fc.lineWidth * 0.5, -Math.PI * 0.78, -Math.PI * 0.18);
-    fc.stroke();
-
-    // Soft top-left specular highlight (small, soft, not harsh)
-    const hl = fc.createRadialGradient(cx - r * 0.35, cy - r * 0.38, 0, cx - r * 0.35, cy - r * 0.38, r * 0.45);
-    hl.addColorStop(0, 'rgba(255,255,255,0.75)');
-    hl.addColorStop(0.5, 'rgba(255,255,255,0.20)');
+    // Tiny soft highlight — just enough to read as a sphere, not a flat disc
+    const hl = fc.createRadialGradient(cx - r * 0.25, cy - r * 0.25, 0,
+                                        cx - r * 0.25, cy - r * 0.25, r * 0.55);
+    hl.addColorStop(0, 'rgba(255,255,255,0.45)');
     hl.addColorStop(1, 'rgba(255,255,255,0)');
     fc.fillStyle = hl;
     fc.beginPath();
-    fc.ellipse(cx - r * 0.32, cy - r * 0.36, r * 0.42, r * 0.32, -Math.PI / 4, 0, Math.PI * 2);
+    fc.arc(cx - r * 0.25, cy - r * 0.25, r * 0.55, 0, Math.PI * 2);
     fc.fill();
-
-    // Outer crisp ring — defines the orb's silhouette against the bg
-    fc.strokeStyle = colorDark + 'cc';
-    fc.lineWidth = Math.max(0.5, r * 0.06);
-    fc.beginPath();
-    fc.arc(cx, cy, r, 0, Math.PI * 2);
-    fc.stroke();
 
     entry = { canvas: off, half: size / 2 };
     foodSpriteCache.set(key, entry);
