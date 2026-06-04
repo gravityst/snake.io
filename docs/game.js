@@ -1278,6 +1278,7 @@
     localGame = null;
     localRoyaleStatus = null;
     mpRoyale = null;
+    spectatingBR = false;
     clearVictoryConfetti();
     try { if (ws && ws.readyState <= 1) ws.close(); } catch {}
     hideAllScreens();
@@ -1369,6 +1370,20 @@
     else if (gameMode==='multiplayer') startMultiplayerGame(currentRoomId, selectedTeamId >= 0 ? selectedTeamId : undefined);
   });
 
+  // Spectate: dismiss death screen, keep watching the match. Camera will
+  // follow the leader (highest-score alive snake).
+  let spectatingBR = false;
+  const spectateBtn = document.getElementById('spectateBtn');
+  if (spectateBtn) {
+    spectateBtn.addEventListener('click', () => {
+      spectatingBR = true;
+      deathScreen.style.display = 'none';
+      hud.style.display = 'block';
+      document.body.style.cursor = 'crosshair';
+      running = true;
+    });
+  }
+
   // Main menu from death screen
   const mainMenuBtn = document.getElementById('mainMenuBtn');
   mainMenuBtn.addEventListener('click', () => {
@@ -1445,6 +1460,7 @@
   // --- PLAY VS AI ---
   function startLocalGame() {
     gameMode = 'local';
+    spectatingBR = false;
     myKills = 0; displayScore = 0; prevScore = 0; scorePopups = []; killFeed = [];
     lifeStartTime = performance.now(); foodEaten = 0; peakScore = 0; emoteDisplays = [];
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
@@ -1459,22 +1475,25 @@
       populateDeathStats();
       const titleEl = document.getElementById('deathTitle');
       const badgeEl = document.getElementById('brRankBadge');
+      const spectateEl = document.getElementById('spectateBtn');
       if (rank != null) {
-        // BR death: show placement (1 = victory, but victory uses a different path)
         const total = localGame ? localGame.snakes.length : 20;
         if (titleEl) titleEl.textContent = 'ELIMINATED';
         if (badgeEl) {
           badgeEl.style.display = 'block';
           badgeEl.textContent = `#${rank} of ${total}`;
         }
+        if (spectateEl) spectateEl.style.display = '';
       } else {
         if (titleEl) titleEl.textContent = 'YOU DIED';
         if (badgeEl) badgeEl.style.display = 'none';
+        if (spectateEl) spectateEl.style.display = 'none';
       }
       deathScreen.style.display = 'flex';
       document.body.style.cursor = 'default';
       screenShake = 15;
-      running = false;
+      // Don't fully stop running in BR — keep simulating so Spectate works.
+      running = !!(localGame && localGame.mode === 'royale');
     });
     // Set initial camera
     const me = localGame.snakes.find(s => s.id === myId);
@@ -1643,6 +1662,7 @@
 
   function startMultiplayerGame(roomId, teamId) {
     gameMode = 'multiplayer';
+    spectatingBR = false;
     myKills = 0; displayScore = 0; prevScore = 0; scorePopups = []; killFeed = [];
     lifeStartTime = performance.now(); foodEaten = 0; peakScore = 0; emoteDisplays = [];
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
@@ -2162,7 +2182,14 @@
     // Ping is tracked separately from the server status HTTP poll (see serverPingRtt)
     lastStateTime = performance.now();
     const me=snakes.find(s=>s.id===myId);
-    if (me&&me.segments.length>0) {
+    if (spectatingBR && (!me || !me.alive)) {
+      // Multiplayer spectator: follow the highest-score alive snake
+      const target = snakes.filter(s => s.alive).sort((a,b) => b.score - a.score)[0];
+      if (target && target.segments.length > 0) {
+        camera.x += (target.segments[0].x - camera.x) * 0.12;
+        camera.y += (target.segments[0].y - camera.y) * 0.12;
+      }
+    } else if (me && me.segments.length > 0) {
       // Fix 5: camera follows predicted head (not stale server position)
       const camTgtX = (gameMode === 'multiplayer' && predict.valid) ? predict.x : me.segments[0].x;
       const camTgtY = (gameMode === 'multiplayer' && predict.valid) ? predict.y : me.segments[0].y;
@@ -2221,11 +2248,12 @@
     if (lastScore > peakScore) peakScore = lastScore;
     populateDeathStats();
     screenShake=15;
-    // Multiplayer BR: show ELIMINATED with rank, hide respawn (no rejoin)
     const titleEl = document.getElementById('deathTitle');
     const badgeEl = document.getElementById('brRankBadge');
     const respawnEl = document.getElementById('respawnBtn');
-    if (mpRoyale && (mpRoyale.state === 'active' || mpRoyale.state === 'ended')) {
+    const spectateEl = document.getElementById('spectateBtn');
+    const inMpBR = mpRoyale && (mpRoyale.state === 'active' || mpRoyale.state === 'ended');
+    if (inMpBR) {
       if (titleEl) titleEl.textContent = 'ELIMINATED';
       if (badgeEl) {
         const alive = mpRoyale.aliveCount || 0;
@@ -2233,20 +2261,26 @@
         badgeEl.textContent = `#${alive + 1} of 20`;
       }
       if (respawnEl) respawnEl.style.display = 'none';
+      if (spectateEl) spectateEl.style.display = '';
     } else {
       if (titleEl) titleEl.textContent = 'YOU DIED';
       if (badgeEl) badgeEl.style.display = 'none';
       if (respawnEl) respawnEl.style.display = '';
+      if (spectateEl) spectateEl.style.display = 'none';
     }
-    myId=null;
-    disconnect(); // ALWAYS disconnect immediately — no phantom reconnects
+    // Multiplayer BR: keep the connection so the player can spectate. Other
+    // modes: disconnect immediately to avoid phantom reconnects.
+    if (!inMpBR) {
+      myId = null;
+      disconnect();
+    }
     if (lastKillerPos) {
       spectateTarget = { x: lastKillerPos.x, y: lastKillerPos.y };
       spectateTimer = 0.8;
     } else {
       deathScreen.style.display='flex';
       document.body.style.cursor='default';
-      running=false;
+      running = inMpBR; // keep running so spectator camera can pan
     }
   }
 
@@ -2392,7 +2426,119 @@
     if (royaleBanners.length > 4) royaleBanners.shift();
   }
 
-  // Victory Royale celebration — confetti rain + golden crown + glowing text.
+  // Custom-painted golden crown — 3D gold body with three jewels (ruby,
+  // sapphire, emerald), shine, base band with rivets. Renders centered at
+  // (cx, cy) scaled to fit a given outer radius `r`. Used in Victory Royale
+  // celebration and on the winner's head.
+  function drawGoldCrown(ctx, cx, cy, r, opts = {}) {
+    const tilt = opts.tilt || 0;
+    const glow = opts.glow !== false;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(tilt);
+    // Outer glow halo
+    if (glow) {
+      const halo = ctx.createRadialGradient(0, 0, r * 0.4, 0, 0, r * 1.8);
+      halo.addColorStop(0, 'rgba(251,191,36,0.45)');
+      halo.addColorStop(1, 'rgba(251,191,36,0)');
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Shadow under base
+    ctx.fillStyle = 'rgba(0,0,0,0.40)';
+    ctx.beginPath();
+    ctx.ellipse(0, r * 0.55, r * 0.85, r * 0.14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // ---- Crown silhouette path (5 spikes, base band) ----
+    // Coordinates roughly: width ±0.95r, height -1.1r..+0.55r
+    const crownPath = new Path2D();
+    crownPath.moveTo(-0.95 * r,  0.55 * r);
+    crownPath.lineTo(-0.95 * r, -0.30 * r);
+    crownPath.lineTo(-0.72 * r, -0.95 * r);  // left spike tip
+    crownPath.lineTo(-0.42 * r, -0.45 * r);  // left dip
+    crownPath.lineTo(-0.14 * r, -1.10 * r);  // left-center spike tip
+    crownPath.lineTo( 0    ,    -0.55 * r);  // center dip
+    crownPath.lineTo( 0.14 * r, -1.10 * r);  // right-center spike tip
+    crownPath.lineTo( 0.42 * r, -0.45 * r);
+    crownPath.lineTo( 0.72 * r, -0.95 * r);
+    crownPath.lineTo( 0.95 * r, -0.30 * r);
+    crownPath.lineTo( 0.95 * r,  0.55 * r);
+    crownPath.closePath();
+    // Fill — vertical gold gradient
+    const goldGrad = ctx.createLinearGradient(0, -r * 1.1, 0, r * 0.55);
+    goldGrad.addColorStop(0,    '#fff8c4');
+    goldGrad.addColorStop(0.30, '#fde047');
+    goldGrad.addColorStop(0.55, '#f59e0b');
+    goldGrad.addColorStop(0.85, '#b45309');
+    goldGrad.addColorStop(1,    '#78350f');
+    ctx.fillStyle = goldGrad;
+    ctx.fill(crownPath);
+    // Inner highlight along the top edges of the spikes
+    ctx.strokeStyle = 'rgba(255,255,200,0.85)';
+    ctx.lineWidth = Math.max(1, r * 0.05);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-0.92 * r, -0.32 * r); ctx.lineTo(-0.72 * r, -0.86 * r);
+    ctx.moveTo(-0.18 * r, -1.0 * r);  ctx.lineTo(-0.06 * r, -1.0 * r);
+    ctx.moveTo( 0.92 * r, -0.32 * r); ctx.lineTo( 0.72 * r, -0.86 * r);
+    ctx.moveTo( 0.06 * r, -1.0 * r);  ctx.lineTo( 0.18 * r, -1.0 * r);
+    ctx.stroke();
+    // Base band — darker rim
+    ctx.fillStyle = 'rgba(120, 70, 0, 0.45)';
+    ctx.fillRect(-0.95 * r, 0.12 * r, 1.9 * r, 0.20 * r);
+    // Rivets on base band (3 small dots)
+    ctx.fillStyle = '#fde047';
+    for (let i = -1; i <= 1; i++) {
+      ctx.beginPath();
+      ctx.arc(i * 0.50 * r, 0.22 * r, r * 0.05, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // ---- Three jewels: ruby (left), sapphire (center), emerald (right) ----
+    const jewels = [
+      { x: -0.42 * r, y: -0.10 * r, light: '#ffaeae', mid: '#ef4444', dark: '#7f1d1d' },
+      { x:  0,        y: -0.18 * r, light: '#9bdcff', mid: '#3b82f6', dark: '#1e3a8a' },
+      { x:  0.42 * r, y: -0.10 * r, light: '#a1f3a1', mid: '#22c55e', dark: '#14532d' },
+    ];
+    for (const j of jewels) {
+      const jr = r * 0.18;
+      // Jewel body
+      const jgrad = ctx.createRadialGradient(j.x - jr * 0.3, j.y - jr * 0.3, jr * 0.1, j.x, j.y, jr);
+      jgrad.addColorStop(0, j.light);
+      jgrad.addColorStop(0.55, j.mid);
+      jgrad.addColorStop(1, j.dark);
+      ctx.fillStyle = jgrad;
+      ctx.beginPath();
+      ctx.arc(j.x, j.y, jr, 0, Math.PI * 2);
+      ctx.fill();
+      // Jewel rim
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = Math.max(0.5, r * 0.018);
+      ctx.beginPath();
+      ctx.arc(j.x, j.y, jr, 0, Math.PI * 2);
+      ctx.stroke();
+      // Specular spot
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(j.x - jr * 0.35, j.y - jr * 0.35, jr * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Crisp outer outline for silhouette pop
+    ctx.strokeStyle = '#5e3a05';
+    ctx.lineWidth = Math.max(0.8, r * 0.035);
+    ctx.stroke(crownPath);
+    // Top tip stars (small twinkles on each spike tip)
+    ctx.fillStyle = 'rgba(255,255,220,0.95)';
+    for (const tip of [[-0.72, -0.95], [-0.14, -1.10], [0, -0.55], [0.14, -1.10], [0.72, -0.95]]) {
+      ctx.beginPath();
+      ctx.arc(tip[0] * r, tip[1] * r - r * 0.02, r * 0.04, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Victory Royale celebration — confetti rain + painted golden crown + glowing text.
   let victoryConfetti = [];
   function spawnVictoryConfetti() {
     if (victoryConfetti.length > 0) return;
@@ -2435,12 +2581,12 @@
       ctx.fillRect(-c.size/2, -c.size/4, c.size, c.size/2);
       ctx.restore();
     }
-    // Golden crown emoji at top
-    ctx.font = '128px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"';
+    // Painted golden crown floating at top, bobbing gently
+    const crownY = H/2 - 150 + Math.sin(animTime * 1.6) * 8;
+    const crownTilt = Math.sin(animTime * 0.9) * 0.08;
+    drawGoldCrown(ctx, W/2, crownY, 80, { tilt: crownTilt, glow: true });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const crownY = H/2 - 150 + Math.sin(animTime * 1.6) * 6;
-    ctx.fillText('👑', W/2, crownY);
     // Title — pulsing gold
     const titlePulse = 1 + 0.04 * Math.sin(animTime * 4);
     ctx.font = `800 ${Math.round(72 * titlePulse)}px 'Space Grotesk', 'Inter', sans-serif`;
@@ -3050,6 +3196,14 @@
     }
     // Crown on #1 snake
     if(snake.id===topSnakeId) drawCrown(hx, hy, headR);
+    // Painted Victory Royale crown on the winner during celebration
+    const isLocalWin = localGame && localGame.matchState === 'victory' && snake.id === myId;
+    const isMpWin = mpRoyale && mpRoyale.state === 'ended' && mpRoyale.winnerId === snake.id;
+    if (isLocalWin || isMpWin) {
+      const bob = Math.sin(animTime * 1.6) * (headR * 0.12);
+      const tilt = Math.sin(animTime * 0.9) * 0.08;
+      drawGoldCrown(ctx, hx, hy - headR * 2.3 + bob, headR * 1.8, { tilt, glow: true });
+    }
     // Accessory
     if(snake.accessory > 0) drawAccessory(ctx, snake.accessory, hx, hy, headR, angle);
     // Boost trail: use CURRENT interpolated tail position
@@ -3391,7 +3545,16 @@
         food = localNewFood;
         megaOrbs = localGame.megaOrbs;
         const me = localGame.snakes.find(s => s.id === myId);
-        if (me && me.alive) {
+        // Spectator camera: follow the leader (highest-score alive snake)
+        if (spectatingBR && (!me || !me.alive)) {
+          const target = localGame.snakes
+            .filter(s => s.alive)
+            .sort((a, b) => b.score - a.score)[0];
+          if (target && target.segments.length > 0) {
+            camera.x += (target.segments[0].x - camera.x) * 0.10;
+            camera.y += (target.segments[0].y - camera.y) * 0.10;
+          }
+        } else if (me && me.alive) {
           camera.x += (me.segments[0].x - camera.x) * 0.12;
           camera.y += (me.segments[0].y - camera.y) * 0.12;
           // Score popup on increase (local)
@@ -3521,6 +3684,22 @@
       localRoyaleStatus = null;
     }
     drawRoyaleHUD(dt, cx, cy);
+    // SPECTATING pill while watching after elimination
+    if (spectatingBR) {
+      ctx.save();
+      const txt = 'SPECTATING';
+      ctx.font = "800 11px 'Inter', sans-serif";
+      const w = ctx.measureText(txt).width + 28;
+      const px = canvas.width/2 - w/2, py = canvas.height - 56;
+      ctx.fillStyle = 'rgba(10,12,28,0.85)';
+      ctx.strokeStyle = 'rgba(167,139,250,0.6)';
+      roundRect(ctx, px, py, w, 24, 12);
+      ctx.fill(); ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.fillStyle = '#c4b5fd';
+      ctx.textAlign = 'center';
+      ctx.fillText(txt, canvas.width/2, py + 16);
+      ctx.restore();
+    }
     // Spectate text
     if (spectateTimer > 0) {
       ctx.font = 'bold 20px "Segoe UI",sans-serif';

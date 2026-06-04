@@ -76,17 +76,37 @@ class Room {
 
     // ---- Battle Royale state ----
     if (this.mode === 'royale') {
+      // Per-room config from the creator's BR settings (or defaults).
+      const cfg = opts.royaleConfig || {};
+      const startR = cfg.startRadius && cfg.startRadius > 200
+        ? Math.min(cfg.startRadius, ROYALE_INITIAL_RADIUS)
+        : ROYALE_INITIAL_RADIUS;
+      const sp = Math.max(0.5, Math.min(2, cfg.phaseSpeed || 1));
+      // Build phase array — scales hold/shrink times by sp and radii by startR.
+      if (startR === ROYALE_INITIAL_RADIUS && sp === 1) {
+        this.royalePhases = ROYALE_PHASES;
+      } else {
+        this.royalePhases = [
+          { hold: 25 * sp, shrinkTime: 30 * sp, radius: Math.max(120, Math.floor(startR * 0.55)), damage: 4  },
+          { hold: 18 * sp, shrinkTime: 28 * sp, radius: Math.max(100, Math.floor(startR * 0.32)), damage: 7  },
+          { hold: 14 * sp, shrinkTime: 22 * sp, radius: Math.max( 80, Math.floor(startR * 0.16)), damage: 11 },
+          { hold: 10 * sp, shrinkTime: 16 * sp, radius: Math.max( 60, Math.floor(startR * 0.07)), damage: 16 },
+          { hold:  8 * sp, shrinkTime: 12 * sp, radius: Math.max( 40, Math.floor(startR * 0.025)), damage: 24 },
+        ];
+      }
+      this.royaleInitialRadius = startR;
+      this.royaleBotDifficulty = cfg.botDifficulty || 'mixed';
       this.royaleState = 'lobby';
-      this.royaleJoinDeadline = 0;             // wall-clock ms when match starts
-      this.royaleMatchStart = 0;               // wall-clock ms when active began
-      this.royaleEndTime = 0;                  // wall-clock ms of round end
-      this.royalePhaseIndex = -1;              // -1 = not started
-      this.royalePhaseStart = 0;               // wall-clock ms when current phase began
+      this.royaleJoinDeadline = 0;
+      this.royaleMatchStart = 0;
+      this.royaleEndTime = 0;
+      this.royalePhaseIndex = -1;
+      this.royalePhaseStart = 0;
       this.zone = {
         cx: 0, cy: 0,
-        radius: ROYALE_INITIAL_RADIUS,
-        prevRadius: ROYALE_INITIAL_RADIUS,
-        targetRadius: ROYALE_INITIAL_RADIUS,
+        radius: startR,
+        prevRadius: startR,
+        targetRadius: startR,
         damage: 0,
       };
       this.royaleWinnerId = null;
@@ -197,10 +217,28 @@ class Room {
     }
   }
   _randomSkill() {
-    const adv = this.bots.filter(id => { const s=this.snakes.get(id); return s&&s.alive&&s.skill===SKILL_ADVANCED; }).length;
+    const diff = this.royaleBotDifficulty || 'mixed';
     const r = Math.random();
-    if (r<0.05&&adv<MAX_ADVANCED_BOTS) return SKILL_ADVANCED;
-    if (r<0.30) return SKILL_AMATEUR;
+    // BR rooms with a chosen difficulty override the global mix.
+    if (this.mode === 'royale' && diff === 'easy') {
+      if (r < 0.05) return SKILL_AMATEUR;
+      return SKILL_BEGINNER;
+    }
+    if (this.mode === 'royale' && diff === 'hard') {
+      if (r < 0.55) return SKILL_ADVANCED;
+      if (r < 0.95) return SKILL_AMATEUR;
+      return SKILL_BEGINNER;
+    }
+    // Default (and BR "mixed") — slightly tougher mix in BR rooms.
+    if (this.mode === 'royale') {
+      if (r < 0.25) return SKILL_ADVANCED;
+      if (r < 0.65) return SKILL_AMATEUR;
+      return SKILL_BEGINNER;
+    }
+    // Classic rooms keep the original gentle mix.
+    const adv = this.bots.filter(id => { const s=this.snakes.get(id); return s&&s.alive&&s.skill===SKILL_ADVANCED; }).length;
+    if (r < 0.05 && adv < MAX_ADVANCED_BOTS) return SKILL_ADVANCED;
+    if (r < 0.30) return SKILL_AMATEUR;
     return SKILL_BEGINNER;
   }
 
@@ -498,12 +536,12 @@ class Room {
         // Seal the room: lock joins, start match
         this.royaleState = 'active';
         this.royaleMatchStart = now;
-        this.royalePhaseIndex = -1;        // will advance to 0 on first phase tick
+        this.royalePhaseIndex = -1;
         this.royalePhaseStart = now;
         this.zone.cx = 0; this.zone.cy = 0;
-        this.zone.radius = ROYALE_INITIAL_RADIUS;
-        this.zone.prevRadius = ROYALE_INITIAL_RADIUS;
-        this.zone.targetRadius = ROYALE_INITIAL_RADIUS;
+        this.zone.radius = this.royaleInitialRadius;
+        this.zone.prevRadius = this.royaleInitialRadius;
+        this.zone.targetRadius = this.royaleInitialRadius;
         this.zone.damage = 0;
         // Broadcast "match start"
         const buf = Buffer.alloc(2); buf[0]=0x0A; buf[1]=1;
@@ -517,25 +555,23 @@ class Room {
       if (this.royalePhaseIndex < 0) {
         this.royalePhaseIndex = 0;
         this.royalePhaseStart = now;
-        const p = ROYALE_PHASES[0];
+        const p = this.royalePhases[0];
         this.zone.targetRadius = p.radius;
         this.zone.damage = p.damage;
       }
-      const phase = ROYALE_PHASES[this.royalePhaseIndex];
+      const phase = this.royalePhases[this.royalePhaseIndex];
       if (phase) {
         const elapsed = (now - this.royalePhaseStart) / 1000;
         const totalPhaseTime = phase.hold + phase.shrinkTime;
         if (elapsed >= phase.hold && elapsed <= totalPhaseTime) {
-          // Shrinking
           const shrinkT = (elapsed - phase.hold) / phase.shrinkTime;
           this.zone.radius = this.zone.prevRadius + (phase.radius - this.zone.prevRadius) * shrinkT;
         } else if (elapsed > totalPhaseTime) {
-          // Phase done; advance
           this.zone.radius = phase.radius;
           this.zone.prevRadius = phase.radius;
           this.royalePhaseIndex++;
           this.royalePhaseStart = now;
-          const next = ROYALE_PHASES[this.royalePhaseIndex];
+          const next = this.royalePhases[this.royalePhaseIndex];
           if (next) {
             this.zone.targetRadius = next.radius;
             this.zone.damage = next.damage;
@@ -623,9 +659,9 @@ class Room {
     this.royaleWinnerId = null;
     this.royaleWinnerName = '';
     this.zone.cx = 0; this.zone.cy = 0;
-    this.zone.radius = ROYALE_INITIAL_RADIUS;
-    this.zone.prevRadius = ROYALE_INITIAL_RADIUS;
-    this.zone.targetRadius = ROYALE_INITIAL_RADIUS;
+    this.zone.radius = this.royaleInitialRadius;
+    this.zone.prevRadius = this.royaleInitialRadius;
+    this.zone.targetRadius = this.royaleInitialRadius;
     this.zone.damage = 0;
     console.log(`[${this.name}] BR round reset → ${this.royaleState}`);
   }
@@ -791,119 +827,239 @@ class Room {
     }
     return false;
   }
-  _botAI(s,dt){
-    // Royale: tougher AI - upgrade beginners to amateur level on the fly
-    const effSkill = (this.mode === 'royale' && this.royaleState === 'active')
-      ? Math.min(SKILL_ADVANCED, s.skill + 1)
-      : s.skill;
-    if (effSkill===SKILL_ADVANCED) this._advAI(s,dt);
-    else if (effSkill===SKILL_AMATEUR) this._amtAI(s,dt);
-    else this._begAI(s,dt);
+  _botAI(s, dt) {
+    // BR mode promotes every bot one tier and runs the harder tier of AI.
+    const isBR = this.mode === 'royale' && this.royaleState === 'active';
+    const effSkill = isBR ? Math.min(SKILL_ADVANCED, s.skill + 1) : s.skill;
+    if (effSkill === SKILL_ADVANCED) this._hardAI(s, dt);
+    else if (effSkill === SKILL_AMATEUR) this._mediumAI(s, dt);
+    else this._easyAI(s, dt);
   }
 
-  _begAI(s,dt){
-    s.botTimer-=dt;if(s.botTimer>0)return;s.botTimer=0.5+Math.random()*0.6;
-    if(this._fleeZoneIfNeeded(s)) return;
-    const h=s.segments[0],wall=MAP_SIZE/2-250;
-    if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=false;return;}
-    // Basic threat avoidance — don't blindly crash into other snakes
-    for(const[,o]of this.snakes){
-      if(o.id===s.id||!o.alive)continue;
-      // Check if any body segment is close and ahead of us
-      for(let k=0;k<Math.min(o.segments.length,20);k+=2){
-        const dx=o.segments[k].x-h.x,dy=o.segments[k].y-h.y;
-        const d=Math.sqrt(dx*dx+dy*dy);
-        if(d<100){
-          // Check if it's roughly ahead of us
-          const angleToSeg=Math.atan2(dy,dx);
-          let diff=angleToSeg-s.angle;while(diff>Math.PI)diff-=Math.PI*2;while(diff<-Math.PI)diff+=Math.PI*2;
-          if(Math.abs(diff)<Math.PI/2){
-            s.targetAngle=s.angle+(diff>0?-1:1)*Math.PI/2;
-            s.boosting=false;return;
-          }
+  // Multi-angle forward lookahead. Scans 7 candidate headings (forward, ±25°,
+  // ±55°, ±90°) and picks the clearest direction; returns true if forward is
+  // blocked so the caller bails out.
+  _steerAroundBodies(s, dangerR, lookAhead) {
+    const h = s.segments[0];
+    const OFFSETS = [0, -0.44, 0.44, -0.96, 0.96, -1.57, 1.57];
+    let forwardD2 = Infinity, bestScore = -Infinity, bestAngle = s.angle;
+    for (const dA of OFFSETS) {
+      const testAngle = s.angle + dA;
+      const px = h.x + Math.cos(testAngle) * lookAhead;
+      const py = h.y + Math.sin(testAngle) * lookAhead;
+      let minD2 = Infinity;
+      for (const [, o] of this.snakes) {
+        if (!o.alive) continue;
+        const isSelf = o.id === s.id;
+        const startK = isSelf ? 8 : 1;
+        const checkLen = Math.min(o.segments.length, 50);
+        for (let k = startK; k < checkLen; k++) {
+          const seg = o.segments[k];
+          const dx = seg.x - px, dy = seg.y - py;
+          const d2 = dx*dx + dy*dy;
+          if (d2 < minD2) minD2 = d2;
         }
       }
+      if (dA === 0) forwardD2 = minD2;
+      const turnPenalty = Math.abs(dA) * 4000;
+      const score = minD2 - turnPenalty;
+      if (score > bestScore) { bestScore = score; bestAngle = testAngle; }
     }
-    if(Math.random()<0.08){s.botWanderAngle+=(Math.random()-0.5)*2;s.targetAngle=s.botWanderAngle;s.boosting=false;return;}
-    // Eager food chase — bigger range, weighted by value (prefer high-tier dead-snake drops)
-    let cl=null,cBest=0;
-    for(const f of this.food){
-      const dx=f.x-h.x; if(dx>500||dx<-500)continue;
-      const dy=f.y-h.y; if(dy>500||dy<-500)continue;
-      const d2=dx*dx+dy*dy;
-      // value / (dist+40), boosted for tier>=2 (dead-snake remains)
-      const tierBoost = (f.tier||0) >= 2 ? 1.6 : 1.0;
-      const score = ((f.value||1) * tierBoost) / (Math.sqrt(d2)+40);
-      if (score>cBest){cBest=score;cl=f;}
+    if (forwardD2 < dangerR * dangerR) {
+      s.targetAngle = bestAngle;
+      return true;
     }
-    if(cl)s.targetAngle=Math.atan2(cl.y-h.y,cl.x-h.x);else{s.botWanderAngle+=(Math.random()-0.5)*1.5;s.targetAngle=s.botWanderAngle;}
-    s.boosting=false;
+    return false;
   }
-  _amtAI(s,dt){
-    s.botTimer-=dt;if(s.botTimer>0)return;s.botTimer=0.3+Math.random()*0.4;
-    if(this._fleeZoneIfNeeded(s)) return;
-    const h=s.segments[0],wall=MAP_SIZE/2-250;
-    if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=true;return;}
-    // Bigger food chase range + value/tier weighting
-    let cl=null,cBest=0;
-    for(const f of this.food){
-      const dx=f.x-h.x; if(dx>700||dx<-700)continue;
-      const dy=f.y-h.y; if(dy>700||dy<-700)continue;
-      const tierBoost = (f.tier||0) >= 2 ? 1.8 : 1.0;
-      const score = ((f.value||1) * tierBoost) / (Math.sqrt(dx*dx+dy*dy)+40);
-      if(score>cBest){cBest=score;cl=f;}
-    }
-    for(const[,o]of this.snakes){if(o.id===s.id||!o.alive)continue;const dx=o.segments[0].x-h.x,dy=o.segments[0].y-h.y,d=Math.sqrt(dx*dx+dy*dy);
-      if(d<180){s.targetAngle=Math.atan2(-dy,-dx)+(Math.random()-0.5)*0.5;s.boosting=d<90;return;}}
-    if(cl){s.targetAngle=Math.atan2(cl.y-h.y,cl.x-h.x);s.boosting=cBest>0.3 && s.score>15;}
-    else{s.botWanderAngle+=(Math.random()-0.5)*1.2;s.targetAngle=s.botWanderAngle;s.boosting=false;}
-  }
-  _advAI(s,dt){
-    s.botTimer-=dt;if(s.botTimer>0)return;s.botTimer=0.08;
-    if(this._fleeZoneIfNeeded(s)) return;
-    const h=s.segments[0],wall=MAP_SIZE/2-250;
-    if(Math.abs(h.x)>wall||Math.abs(h.y)>wall){s.targetAngle=Math.atan2(-h.y,-h.x);s.boosting=false;return;}
-    // Check body segments ahead — avoid collisions with ANY snake body
-    for(const[,o]of this.snakes){
-      if(o.id===s.id||!o.alive)continue;
-      for(let k=0;k<Math.min(o.segments.length,30);k+=2){
-        const dx=o.segments[k].x-h.x,dy=o.segments[k].y-h.y;
-        const d=Math.sqrt(dx*dx+dy*dy);
-        if(d<80){
-          const aTo=Math.atan2(dy,dx);let diff=aTo-s.angle;while(diff>Math.PI)diff-=Math.PI*2;while(diff<-Math.PI)diff+=Math.PI*2;
-          if(Math.abs(diff)<Math.PI/3){s.targetAngle=s.angle+(diff>0?-1:1)*Math.PI/2.5;s.boosting=false;return;}
-        }
+
+  // Crowd density probe — breaks off chases that would dogpile a single spot.
+  _crowdedAt(x, y, radius, threshold = 3) {
+    let count = 0;
+    for (const [, o] of this.snakes) {
+      if (!o.alive || o.segments.length === 0) continue;
+      const dx = o.segments[0].x - x, dy = o.segments[0].y - y;
+      if (dx*dx + dy*dy < radius * radius) {
+        if (++count >= threshold) return true;
       }
     }
-    // Flee from bigger threats
-    for(const[,o]of this.snakes){if(o.id===s.id||!o.alive)continue;const dx=o.segments[0].x-h.x,dy=o.segments[0].y-h.y,d=Math.sqrt(dx*dx+dy*dy);
-      if(d<250&&o.score>=s.score*0.8){s.targetAngle=Math.atan2(-dy,-dx)+(Math.random()<0.5?-0.4:0.4);s.boosting=d<150&&s.score>25;return;}}
-    // Hunt mega orbs with prediction
-    let bm=null,bmd=2000;for(const m of this.megaOrbs){const d=Math.sqrt((m.x-h.x)**2+(m.y-h.y)**2);if(d<bmd){bmd=d;bm=m;}}
-    if(bm){const t=bmd/SNAKE_SPEED;s.targetAngle=Math.atan2(bm.y+bm.vy*t-h.y,bm.x+bm.vx*t-h.x);s.boosting=bmd>400&&bmd<1200&&s.score>15;return;}
-    // Hunt smaller snakes — aim to cut off their path
-    let bp=null,bpd=900;for(const[,o]of this.snakes){if(o.id===s.id||!o.alive||o.score>=s.score*0.6)continue;const d=Math.sqrt((o.segments[0].x-h.x)**2+(o.segments[0].y-h.y)**2);if(d<bpd){bpd=d;bp=o;}}
-    if(bp){
-      // Aim perpendicular to prey's direction to cut them off
-      const la=0.6+bpd/300;
-      const predX=bp.segments[0].x+Math.cos(bp.angle)*SNAKE_SPEED*la;
-      const predY=bp.segments[0].y+Math.sin(bp.angle)*SNAKE_SPEED*la;
-      s.targetAngle=Math.atan2(predY-h.y,predX-h.x);
-      s.boosting=bpd>200&&bpd<600&&s.score>30;
+    return false;
+  }
+
+  _closestFood(s, maxR) {
+    const h = s.segments[0];
+    let best = null, bd2 = maxR * maxR;
+    for (const f of this.food) {
+      const dx = f.x - h.x, dy = f.y - h.y;
+      if (dx > maxR || dx < -maxR || dy > maxR || dy < -maxR) continue;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bd2) { bd2 = d2; best = f; }
+    }
+    return best;
+  }
+
+  // Value-weighted food search: ratio = value / (distance + 40).
+  _bestFoodByValue(s, maxR) {
+    const h = s.segments[0];
+    let best = null, bestRatio = 0;
+    for (const f of this.food) {
+      const dx = f.x - h.x, dy = f.y - h.y;
+      if (dx > maxR || dx < -maxR || dy > maxR || dy < -maxR) continue;
+      const d = Math.sqrt(dx*dx + dy*dy) + 40;
+      const tier = f.tier || 0;
+      const tierBoost = tier >= 4 ? 2.2 : tier >= 2 ? 1.6 : 1.0;
+      const ratio = ((f.value || 1) * tierBoost) / d;
+      if (ratio > bestRatio) { bestRatio = ratio; best = f; }
+    }
+    return best;
+  }
+
+  // EASY tier — wanders gently, picks nearest food, lookahead avoids most bodies.
+  _easyAI(s, dt) {
+    s.botTimer -= dt;
+    if (s.botTimer > 0) return;
+    s.botTimer = 0.15 + Math.random() * 0.12;
+    if (this._fleeZoneIfNeeded(s)) return;
+    const h = s.segments[0];
+    const wall = MAP_SIZE / 2 - 250;
+    if (Math.abs(h.x) > wall || Math.abs(h.y) > wall) {
+      s.targetAngle = Math.atan2(-h.y, -h.x);
+      s.boosting = false;
       return;
     }
-    // High-value food with better range — heavily prefer dead-snake remains (tier >= 2)
-    let bf=null,br=0;
-    for(const f of this.food){
-      const dx=f.x-h.x;if(dx>1400||dx<-1400)continue;
-      const dy=f.y-h.y;if(dy>1400||dy<-1400)continue;
-      const tier = f.tier || 0;
-      const tierBoost = tier >= 4 ? 2.4 : tier >= 2 ? 1.8 : 1.0;
-      const ratio = ((f.value||1) * tierBoost) / (Math.sqrt(dx*dx+dy*dy)+40);
-      if(ratio>br){br=ratio;bf=f;}
+    if (this._steerAroundBodies(s, 95, 170)) {
+      s.boosting = false;
+      return;
     }
-    if(bf){s.targetAngle=Math.atan2(bf.y-h.y,bf.x-h.x);s.boosting=br>0.4 && s.score>40;return;}
-    s.botWanderAngle+=(Math.random()-0.5)*0.4;s.targetAngle=s.botWanderAngle;s.boosting=false;
+    const f = this._closestFood(s, 700);
+    if (f) {
+      s.targetAngle = Math.atan2(f.y - h.y, f.x - h.x);
+    } else {
+      s.botWanderAngle += (Math.random() - 0.5) * 0.6;
+      s.targetAngle = s.botWanderAngle;
+    }
+    s.boosting = false;
+  }
+
+  // MEDIUM tier — value-weighted food, mega orbs, threat flee, crowd skip.
+  _mediumAI(s, dt) {
+    s.botTimer -= dt;
+    if (s.botTimer > 0) return;
+    s.botTimer = 0.09 + Math.random() * 0.06;
+    if (this._fleeZoneIfNeeded(s)) return;
+    const h = s.segments[0];
+    const wall = MAP_SIZE / 2 - 250;
+    if (Math.abs(h.x) > wall || Math.abs(h.y) > wall) {
+      s.targetAngle = Math.atan2(-h.y, -h.x);
+      s.boosting = false;
+      return;
+    }
+    if (this._steerAroundBodies(s, 110, 220)) {
+      s.boosting = false;
+      return;
+    }
+    // Flee any bigger snake's head
+    for (const [, o] of this.snakes) {
+      if (o.id === s.id || !o.alive) continue;
+      const dx = o.segments[0].x - h.x, dy = o.segments[0].y - h.y;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < 280 * 280 && o.score >= s.score * 0.85) {
+        s.targetAngle = Math.atan2(-dy, -dx) + (Math.random() - 0.5) * 0.4;
+        s.boosting = d2 < 160 * 160 && s.score > 12;
+        return;
+      }
+    }
+    // Mega orbs (skip dogpiles)
+    let bm = null, bmd2 = 1300 * 1300;
+    for (const m of this.megaOrbs) {
+      const dx = m.x - h.x, dy = m.y - h.y;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bmd2 && !this._crowdedAt(m.x, m.y, 350, 3)) { bmd2 = d2; bm = m; }
+    }
+    if (bm) {
+      const bmd = Math.sqrt(bmd2);
+      const t = bmd / SNAKE_SPEED;
+      s.targetAngle = Math.atan2(bm.y + bm.vy * t - h.y, bm.x + bm.vx * t - h.x);
+      s.boosting = bmd > 350 && bmd < 1100 && s.score > 20;
+      return;
+    }
+    const f = this._bestFoodByValue(s, 900);
+    if (f && !this._crowdedAt(f.x, f.y, 250, 3)) {
+      s.targetAngle = Math.atan2(f.y - h.y, f.x - h.x);
+    } else {
+      s.botWanderAngle += (Math.random() - 0.5) * 0.5;
+      s.targetAngle = s.botWanderAngle;
+    }
+    s.boosting = false;
+  }
+
+  // HARD tier — predicts heads, cuts off smaller snakes, hunts mega orbs and
+  // fat death piles, flees bigger threats with boost. Reacts every ~50ms.
+  _hardAI(s, dt) {
+    s.botTimer -= dt;
+    if (s.botTimer > 0) return;
+    s.botTimer = 0.05;
+    if (this._fleeZoneIfNeeded(s)) return;
+    const h = s.segments[0];
+    const wall = MAP_SIZE / 2 - 250;
+    if (Math.abs(h.x) > wall || Math.abs(h.y) > wall) {
+      s.targetAngle = Math.atan2(-h.y, -h.x);
+      s.boosting = false;
+      return;
+    }
+    if (this._steerAroundBodies(s, 125, 260)) {
+      s.boosting = false;
+      return;
+    }
+    // Threat / opportunity scan vs every other snake
+    let bestPrey = null, bestPreyD2 = 600 * 600;
+    for (const [, o] of this.snakes) {
+      if (o.id === s.id || !o.alive) continue;
+      const dx = o.segments[0].x - h.x, dy = o.segments[0].y - h.y;
+      const d2 = dx*dx + dy*dy;
+      // Flee bigger threats
+      if (d2 < 320 * 320 && o.score >= s.score * 1.05) {
+        s.targetAngle = Math.atan2(-dy, -dx) + (Math.random() < 0.5 ? -0.45 : 0.45);
+        s.boosting = d2 < 200 * 200 && s.score > 12;
+        return;
+      }
+      // Track potential prey
+      if (o.score < s.score * 0.6 && d2 < bestPreyD2 &&
+          !this._crowdedAt(o.segments[0].x, o.segments[0].y, 280, 2)) {
+        bestPreyD2 = d2; bestPrey = o;
+      }
+    }
+    // Mega orbs
+    let bm = null, bmd2 = 1800 * 1800;
+    for (const m of this.megaOrbs) {
+      const dx = m.x - h.x, dy = m.y - h.y;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bmd2 && !this._crowdedAt(m.x, m.y, 350, 3)) { bmd2 = d2; bm = m; }
+    }
+    if (bm) {
+      const bmd = Math.sqrt(bmd2);
+      const t = bmd / SNAKE_SPEED;
+      s.targetAngle = Math.atan2(bm.y + bm.vy * t - h.y, bm.x + bm.vx * t - h.x);
+      s.boosting = bmd > 300 && bmd < 1400 && s.score > 18;
+      return;
+    }
+    if (bestPrey) {
+      const bpd = Math.sqrt(bestPreyD2);
+      const lead = 0.5 + bpd / 320;
+      const px = bestPrey.segments[0].x + Math.cos(bestPrey.angle) * SNAKE_SPEED * lead;
+      const py = bestPrey.segments[0].y + Math.sin(bestPrey.angle) * SNAKE_SPEED * lead;
+      s.targetAngle = Math.atan2(py - h.y, px - h.x);
+      s.boosting = bpd > 180 && bpd < 450 && s.score > 30;
+      return;
+    }
+    const bf = this._bestFoodByValue(s, 1300);
+    if (bf && !this._crowdedAt(bf.x, bf.y, 280, 3)) {
+      s.targetAngle = Math.atan2(bf.y - h.y, bf.x - h.x);
+      s.boosting = (bf.value || 1) >= 10 && s.score > 40 && Math.random() < 0.15;
+      return;
+    }
+    s.botWanderAngle += (Math.random() - 0.5) * 0.3;
+    s.targetAngle = s.botWanderAngle;
+    s.boosting = false;
   }
 
   // --- Broadcasting ---
