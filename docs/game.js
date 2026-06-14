@@ -1059,12 +1059,22 @@
 
   // --- Helpers ---
   function hexFull(c) { if (c.length===4) return '#'+c[1]+c[1]+c[2]+c[2]+c[3]+c[3]; return c; }
+  // Cache each team color's two shades so getSegColor never allocates in the
+  // per-segment render loop (darken() builds strings — calling it per segment
+  // per frame caused GC stutter in the team modes).
+  const _teamShadeCache = new Map(); // colorHex -> [base, darkBand]
+  function teamShades(hex) {
+    let pair = _teamShadeCache.get(hex);
+    if (!pair) { pair = [hex, hex.length === 7 ? darken(hex, 0.26) : hex]; _teamShadeCache.set(hex, pair); }
+    return pair;
+  }
   function getSegColor(snake, i) {
-    // Zone Domination: color every snake by its team so red vs blue reads at a
-    // glance. Banded (base / darker shade) keeps a little body texture.
+    // Team modes: color every snake by its team so red vs blue reads at a glance.
+    // Banded (base / darker shade) keeps a little body texture — both shades are
+    // cached, so this stays a couple of Map lookups (no allocation).
     if (snake.teamId >= 0 && ((domLayout && mpDom) || (ctfLayout && mpCtf))) {
       const base = (ctfLayout && mpCtf) ? ctfTeamColor(snake.teamId) : domTeamColor(snake.teamId);
-      return (i % 4 < 2 || base.length !== 7) ? base : darken(base, 0.26);
+      return teamShades(base)[(i % 4 < 2) ? 0 : 1];
     }
     const skin = SKINS[snake.skin]||SKINS[0]; return skin.colors[i%skin.colors.length];
   }
