@@ -132,6 +132,25 @@ const ROLE_CAPTURE_WEIGHT = [1.0, 1.0, 1.0, 1.35]; // Commander rallies (heavier
 const DOM_EVENT_TYPES = ['foodstorm', 'doublepoints', 'relocation'];
 
 // =====================================================
+// CAPTURE THE ORB configuration
+// =====================================================
+// Two teams, each with an orb on a pedestal at its protected base. Steal the
+// enemy orb and carry it to your base — but only while your own orb is home.
+// Reuses the Red/Blue team palette, rectangular map, and protected bases.
+const CTF_MAP_W = 13000, CTF_MAP_H = 8000;     // compact rectangle → punchy runs
+const CTF_ROUND_MS = 6 * 60 * 1000;
+const CTF_END_HOLD_MS = 12000;
+const CTF_CAPTURES_TO_WIN = 3;
+const CTF_BASE_X_FRAC = 0.62;                  // base centre x = ±frac * halfW
+const CTF_BASE_RADIUS = 1100;                  // protected sanctuary + spawn
+const CTF_ORB_RADIUS = 40;                     // visual / collision size of an orb
+const CTF_PICKUP_R = 95;                       // head-to-orb pickup distance
+const CTF_SCORE_R = 360;                       // deliver radius around your own base centre
+const CTF_RETURN_SEC = 8;                       // a dropped orb returns home after this idle
+const CTF_MAX_BOTS = 12;                        // fill both teams
+const CTF_TEAMS = 2;
+
+// =====================================================
 // Room
 // =====================================================
 class Room {
@@ -144,12 +163,15 @@ class Room {
     this.isCustom = opts.isCustom || false;
     this.creatorName = opts.creatorName || '';
 
-    // Playfield bounds. Square by default; Zone Domination uses a rectangle.
+    // Playfield bounds. Square by default; Zone Domination & CTF use rectangles.
     this.mapHalfW = MAP_SIZE / 2;
     this.mapHalfH = MAP_SIZE / 2;
     if (this.mode === 'domination') {
       this.mapHalfW = DOM_MAP_W / 2;
       this.mapHalfH = DOM_MAP_H / 2;
+    } else if (this.mode === 'ctf') {
+      this.mapHalfW = CTF_MAP_W / 2;
+      this.mapHalfH = CTF_MAP_H / 2;
     }
 
     // ---- Battle Royale state ----
@@ -192,20 +214,23 @@ class Room {
     }
 
 
-    // Team state (team + domination modes)
-    // teams: Map<teamId, { name, color, memberIds: Set<snakeId>, domScore, resources }>
+    // Team state (team / domination / ctf modes)
+    // teams: Map<teamId, { name, color, memberIds: Set<snakeId>, domScore, resources, ctfScore }>
     this.teams = new Map();
     const numTeams = this.mode === 'domination'
       ? Math.max(2, Math.min(opts.numTeams || DOM_TEAMS_DEFAULT, 4))
+      : this.mode === 'ctf' ? CTF_TEAMS
       : (this.mode === 'team' ? Math.min(this.maxTeams, 8) : 0);
-    const isDom = this.mode === 'domination';
+    // Domination & CTF share the high-contrast Red/Blue palette.
+    const redBlue = this.mode === 'domination' || this.mode === 'ctf';
     for (let i = 0; i < numTeams; i++) {
       this.teams.set(i, {
-        name: (isDom ? DOM_TEAM_NAMES[i] : TEAM_NAMES_DEFAULT[i]) || `Team ${i+1}`,
-        color: (isDom ? DOM_TEAM_COLORS[i] : TEAM_COLORS[i]) || '#fff',
+        name: (redBlue ? DOM_TEAM_NAMES[i] : TEAM_NAMES_DEFAULT[i]) || `Team ${i+1}`,
+        color: (redBlue ? DOM_TEAM_COLORS[i] : TEAM_COLORS[i]) || '#fff',
         memberIds: new Set(),
         domScore: 0,    // Zone Domination cumulative team score
         resources: 0,   // Zone Domination team economy
+        ctfScore: 0,    // Capture the Orb captures
       });
     }
 
@@ -224,6 +249,26 @@ class Room {
       this.domLayoutVersion = 1;       // bumped on relocation so clients re-read layout
       this.zones = [];
       this._domBuildZones();
+    }
+
+    // ---- Capture the Orb state ----
+    if (this.mode === 'ctf') {
+      this.ctfState = 'active';        // 'active' | 'ended'
+      this.ctfRoundStart = Date.now();
+      this.ctfRoundEnd = this.ctfRoundStart + CTF_ROUND_MS;
+      this.ctfEndTime = 0;
+      this.ctfWinnerTeam = -1;
+      const bx = Math.round(CTF_BASE_X_FRAC * this.mapHalfW);
+      // Base 0 (Red) on the left, base 1 (Blue) on the right.
+      this.ctfBases = [
+        { team: 0, x: -bx, y: 0, radius: CTF_BASE_RADIUS },
+        { team: 1, x:  bx, y: 0, radius: CTF_BASE_RADIUS },
+      ];
+      // One orb per team, starting on its pedestal.
+      this.ctfOrbs = this.ctfBases.map(b => ({
+        team: b.team, state: 'base', x: b.x, y: b.y,
+        baseX: b.x, baseY: b.y, holder: null, droppedAt: 0,
+      }));
     }
 
     this.snakes = new Map();
@@ -260,6 +305,7 @@ class Room {
       if (this.mode === 'royale' && this.tickCount % 6 === 0) this.broadcastRoyaleState();
       // Zone Domination meta-state at ~5 Hz (JSON text frame)
       if (this.mode === 'domination' && this.tickCount % 6 === 0) this.broadcastDominationState();
+      if (this.mode === 'ctf' && this.tickCount % 6 === 0) this.broadcastCtfState();
     }, BROADCAST_MS);
   }
 
@@ -286,6 +332,7 @@ class Room {
       return Math.max(0, ROYALE_MAX_PLAYERS - this.realPlayerCount);
     }
     if (this.mode === 'domination') return Math.max(0, DOM_MAX_BOTS - this.realPlayerCount);
+    if (this.mode === 'ctf') return Math.max(0, CTF_MAX_BOTS - this.realPlayerCount);
     return Math.max(0, MAX_BOTS - this.realPlayerCount);
   }
 
@@ -371,10 +418,11 @@ class Room {
     else if(r<0.99){radius=15+Math.random()*2;value=18;tier=6;}
     else if(r<0.997){radius=18+Math.random()*2;value=26;tier=7;}
     else{radius=21+Math.random()*3;value=35;tier=8;}
-    const pos=this.mode==='domination'?this._uniformPos():this._zoned(1.5);
+    const pos=(this.mode==='domination'||this.mode==='ctf')?this._uniformPos():this._zoned(1.5);
     return {x:pos.x,y:pos.y,color:Math.floor(Math.random()*8),radius,value,tier};
   }
-  spawnMegaOrbs() { while(this.megaOrbs.length<MEGA_ORB_COUNT) this.megaOrbs.push(this._createMegaOrb()); }
+  // CTF has its own team orbs — skip drifting mega orbs so the two don't get confused.
+  spawnMegaOrbs() { if(this.mode==='ctf')return; while(this.megaOrbs.length<MEGA_ORB_COUNT) this.megaOrbs.push(this._createMegaOrb()); }
   _createMegaOrb() {
     const a=Math.random()*Math.PI*2,speed=25+Math.random()*25,pos=this.mode==='domination'?this._uniformPos(200):this._zoned(1.3);
     return {x:pos.x,y:pos.y,vx:Math.cos(a)*speed,vy:Math.sin(a)*speed,
@@ -394,6 +442,8 @@ class Room {
         this.teams.get(teamId).memberIds.add(snake.id);
       } else if (this.mode==='domination') {
         this._domBotJoin(snake);
+      } else if (this.mode==='ctf') {
+        this._ctfBotJoin(snake);
       }
       this.bots.push(snake.id);
     }
@@ -476,6 +526,17 @@ class Room {
         this.teams.get(tid).memberIds.add(snake.id);
         snake.role = (role >= 0 && role <= 3) ? role : ROLE_SCOUT;
         this._domPlaceAtHome(snake);
+      } else if (this.mode === 'ctf') {
+        // Honor the chosen team; fall back to the smallest if invalid.
+        let tid = teamId;
+        if (!this.teams.has(tid)) {
+          let minTeam = 0, minSize = Infinity;
+          for (const [id, t] of this.teams) if (t.memberIds.size < minSize) { minSize = t.memberIds.size; minTeam = id; }
+          tid = minTeam;
+        }
+        snake.teamId = tid;
+        this.teams.get(tid).memberIds.add(snake.id);
+        this._ctfPlaceAtBase(snake);
       }
     }
 
@@ -494,13 +555,18 @@ class Room {
     ws.send(welcome);
 
     // Send team info: [0x06][teamCount u8][per team: id u8, colorLen u8, color, nameLen u8, name]
-    if (this.mode === 'team' || this.mode === 'domination') {
+    if (this.mode === 'team' || this.mode === 'domination' || this.mode === 'ctf') {
       this._sendTeamInfo(ws);
     }
     // Zone Domination: hand the client the board layout + a current snapshot.
     if (this.mode === 'domination') {
       this._sendDominationLayout(ws);
       this.broadcastDominationState();
+    }
+    // Capture the Orb: send the static layout (bases) + current orb/score state.
+    if (this.mode === 'ctf') {
+      this._sendCtfLayout(ws);
+      this.broadcastCtfState();
     }
 
     this.adjustBots();
@@ -566,6 +632,8 @@ class Room {
         this.teams.get(minTeam).memberIds.add(snake.id);
       } else if (this.mode==='domination') {
         this._domBotJoin(snake);
+      } else if (this.mode==='ctf') {
+        this._ctfBotJoin(snake);
       }
       this.bots.push(snake.id);
     }
@@ -581,7 +649,7 @@ class Room {
       let teamId = -1;
       let role = -1;
       let nameStart = 3;
-      if ((this.mode==='team' || this.mode==='domination') && buf.length>3) {
+      if ((this.mode==='team' || this.mode==='domination' || this.mode==='ctf') && buf.length>3) {
         teamId = buf[3];
         nameStart = 4;
       }
@@ -614,6 +682,8 @@ class Room {
     const snake=this.snakes.get(id);
     if(!snake||!snake.alive) return;
     snake.alive=false;
+    // CTF: a carrier that dies drops the orb where it fell.
+    if(this.mode==='ctf') this._ctfDropOrbsHeldBy(id, snake);
     // Drop food from body — every 3rd segment, capped to max 10 drops
     const dropStep = Math.max(3, Math.floor(snake.segments.length / 15));
     const dropLimit = Math.min(10, Math.floor(snake.segments.length / dropStep));
@@ -669,6 +739,8 @@ class Room {
       snake.teamId=minTeam; this.teams.get(minTeam).memberIds.add(snake.id);
     } else if(this.mode==='domination'){
       this._domBotJoin(snake);
+    } else if(this.mode==='ctf'){
+      this._ctfBotJoin(snake);
     }
     this.bots[idx]=snake.id;
   }
@@ -1046,6 +1118,188 @@ class Room {
     for (const [ws] of this.clients) if (ws.readyState === WebSocket.OPEN) ws.send(s);
   }
 
+  // =====================================================
+  // CAPTURE THE ORB
+  // =====================================================
+  _ctfBase(team) { return this.ctfBases[team] || this.ctfBases[0]; }
+  _ctfEnemyTeam(team) { return team === 0 ? 1 : 0; }
+
+  _ctfPlaceAtBase(snake) {
+    const base = this._ctfBase(snake.teamId);
+    const a = Math.random()*Math.PI*2, r = Math.random()*base.radius*0.5;
+    const cx = base.x + Math.cos(a)*r, cy = base.y + Math.sin(a)*r;
+    const angle = Math.atan2(-cy, -cx); // face the middle of the map
+    snake.angle = snake.targetAngle = angle;
+    snake.segments = [];
+    for (let i = 0; i < INITIAL_LENGTH; i++)
+      snake.segments.push({ x: cx - Math.cos(angle)*i*SEGMENT_SPACING, y: cy - Math.sin(angle)*i*SEGMENT_SPACING });
+  }
+
+  _ctfInOwnBase(snake) {
+    if (!snake || snake.teamId < 0 || snake.segments.length === 0) return false;
+    const base = this._ctfBase(snake.teamId);
+    const h = snake.segments[0], dx = h.x - base.x, dy = h.y - base.y;
+    return dx*dx + dy*dy < base.radius*base.radius;
+  }
+
+  _ctfBotJoin(snake) {
+    let minTeam = 0, minSize = Infinity;
+    for (const [id, t] of this.teams) if (t.memberIds.size < minSize) { minSize = t.memberIds.size; minTeam = id; }
+    snake.teamId = minTeam;
+    this.teams.get(minTeam).memberIds.add(snake.id);
+    snake.ctfRole = Math.random() < 0.5 ? 'attack' : 'defend';
+    snake.evasion = Math.random() < 0.5 ? 1 : 0.6; // half easier to KO, as in domination
+    this._ctfPlaceAtBase(snake);
+  }
+
+  // Nearest alive snake head within pickup range of an orb (or null).
+  _ctfHeadTouching(orb) {
+    let best = null, bd2 = CTF_PICKUP_R*CTF_PICKUP_R;
+    for (const [, s] of this.snakes) {
+      if (!s.alive || s.teamId < 0 || s.segments.length === 0) continue;
+      const h = s.segments[0], dx = h.x - orb.x, dy = h.y - orb.y, d2 = dx*dx + dy*dy;
+      if (d2 < bd2) { bd2 = d2; best = s; }
+    }
+    return best;
+  }
+
+  _ctfReturnOrb(orb, reason, bySnake) {
+    orb.state = 'base'; orb.holder = null; orb.x = orb.baseX; orb.y = orb.baseY; orb.droppedAt = 0;
+    if (reason === 'recover' || reason === 'timeout') this.broadcastCtfEvent('return', orb.team, bySnake ? bySnake.name : '');
+  }
+
+  // Drop any orb carried by snake `id` (called from killSnake before removal).
+  _ctfDropOrbsHeldBy(id, snake) {
+    if (this.mode !== 'ctf') return;
+    for (const orb of this.ctfOrbs) {
+      if (orb.holder === id) {
+        orb.state = 'dropped'; orb.holder = null; orb.droppedAt = Date.now();
+        if (snake && snake.segments.length) { orb.x = snake.segments[0].x; orb.y = snake.segments[0].y; }
+        this.broadcastCtfEvent('drop', orb.team, snake ? snake.name : '');
+      }
+    }
+  }
+
+  _ctfScore(carrier) {
+    const team = this.teams.get(carrier.teamId);
+    if (team) team.ctfScore = (team.ctfScore || 0) + 1;
+    carrier.kills++; // counts toward personal stats
+    this.broadcastCtfEvent('capture', carrier.teamId, carrier.name);
+    for (const orb of this.ctfOrbs) this._ctfReturnOrb(orb, 'reset');
+    if (team && (team.ctfScore || 0) >= CTF_CAPTURES_TO_WIN) this._ctfEndRound(Date.now(), carrier.teamId);
+    else this.broadcastCtfState();
+  }
+
+  _ctfEndRound(now, winnerTeam) {
+    if (winnerTeam === undefined) {
+      let bt = -1, best = -Infinity;
+      for (const [tid, t] of this.teams) if ((t.ctfScore || 0) > best) { best = t.ctfScore || 0; bt = tid; }
+      let maxCount = 0; for (const [, t] of this.teams) if ((t.ctfScore || 0) === best) maxCount++;
+      winnerTeam = maxCount > 1 ? -1 : bt;
+    }
+    this.ctfWinnerTeam = winnerTeam;
+    this.ctfState = 'ended'; this.ctfEndTime = now;
+    this.broadcastCtfState();
+  }
+
+  _ctfResetRound(now) {
+    for (const [, t] of this.teams) t.ctfScore = 0;
+    this.ctfState = 'active'; this.ctfRoundStart = now; this.ctfRoundEnd = now + CTF_ROUND_MS;
+    this.ctfEndTime = 0; this.ctfWinnerTeam = -1;
+    for (const orb of this.ctfOrbs) this._ctfReturnOrb(orb, 'reset');
+    this.broadcastCtfState();
+    console.log(`[${this.name}] Capture the Orb round reset`);
+  }
+
+  _ctfTick(now, dt) {
+    if (this.mode !== 'ctf') return;
+    if (this.ctfState === 'ended') {
+      if (now - this.ctfEndTime > CTF_END_HOLD_MS) this._ctfResetRound(now);
+      return;
+    }
+    if (now >= this.ctfRoundEnd) { this._ctfEndRound(now); return; }
+
+    for (const orb of this.ctfOrbs) {
+      if (orb.state === 'carried') {
+        const carrier = this.snakes.get(orb.holder);
+        if (!carrier || !carrier.alive || carrier.teamId === orb.team || carrier.segments.length === 0) {
+          orb.state = 'dropped'; orb.holder = null; orb.droppedAt = now;
+          continue;
+        }
+        const hh = carrier.segments[0];
+        orb.x = hh.x; orb.y = hh.y;
+        // Deliver: reach your own base while your own orb is safely home.
+        const myBase = this._ctfBase(carrier.teamId);
+        const ownOrb = this.ctfOrbs[carrier.teamId];
+        const dx = hh.x - myBase.x, dy = hh.y - myBase.y;
+        if (dx*dx + dy*dy <= CTF_SCORE_R*CTF_SCORE_R && ownOrb.state === 'base') {
+          this._ctfScore(carrier);
+          return; // orbs reset this frame
+        }
+      } else if (orb.state === 'dropped') {
+        if (now - orb.droppedAt > CTF_RETURN_SEC*1000) { this._ctfReturnOrb(orb, 'timeout'); continue; }
+        const picker = this._ctfHeadTouching(orb);
+        if (picker) {
+          if (picker.teamId === orb.team) this._ctfReturnOrb(orb, 'recover', picker); // own team taps it home
+          else { orb.state = 'carried'; orb.holder = picker.id; this.broadcastCtfEvent('steal', orb.team, picker.name); }
+        }
+      } else { // 'base'
+        const picker = this._ctfHeadTouching(orb);
+        if (picker && picker.teamId !== orb.team) { orb.state = 'carried'; orb.holder = picker.id; this.broadcastCtfEvent('steal', orb.team, picker.name); }
+      }
+    }
+  }
+
+  // CTF bot behavior: carry→deliver, recover a loose own-orb, else attack/defend.
+  _ctfBotObjective(s) {
+    if (this.mode !== 'ctf' || s.teamId < 0 || s.segments.length === 0) return false;
+    const h = s.segments[0];
+    const myOrb = this.ctfOrbs[s.teamId];
+    const enemyOrb = this.ctfOrbs[this._ctfEnemyTeam(s.teamId)];
+    const myBase = this._ctfBase(s.teamId);
+    let tx, ty;
+    if (enemyOrb.holder === s.id) { tx = myBase.x; ty = myBase.y; }      // carrying → run it home
+    else if (myOrb.state !== 'base') { tx = myOrb.x; ty = myOrb.y; }      // our orb loose → all hands recover/chase
+    else if (s.ctfRole === 'defend') { tx = myOrb.x; ty = myOrb.y; }      // guard our pedestal
+    else { tx = enemyOrb.x; ty = enemyOrb.y; }                            // attack → go grab theirs
+    s.targetAngle = Math.atan2(ty - h.y, tx - h.x);
+    s.boosting = false;
+    return true;
+  }
+
+  // ---- CTF broadcasts (JSON text frames) ----
+  _ctfLayoutPayload() {
+    return {
+      t: 'ctfLayout', mapW: this.mapHalfW*2, mapH: this.mapHalfH*2,
+      roundMs: CTF_ROUND_MS, capturesToWin: CTF_CAPTURES_TO_WIN,
+      teams: [...this.teams.entries()].map(([id, t]) => ({ id, name: t.name, color: t.color })),
+      bases: this.ctfBases.map(b => ({ team: b.team, x: b.x, y: b.y, r: b.radius })),
+    };
+  }
+  _sendCtfLayout(ws) { if (this.mode === 'ctf' && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(this._ctfLayoutPayload())); }
+  broadcastCtfState() {
+    if (this.mode !== 'ctf') return;
+    const now = Date.now();
+    const payload = {
+      t: 'ctfState', state: this.ctfState,
+      timeLeft: Math.max(0, this.ctfRoundEnd - now),
+      endLeft: this.ctfState === 'ended' ? Math.max(0, this.ctfEndTime + CTF_END_HOLD_MS - now) : 0,
+      winner: this.ctfWinnerTeam, capturesToWin: CTF_CAPTURES_TO_WIN,
+      teams: [...this.teams.entries()].map(([id, t]) => ({ id, score: t.ctfScore || 0 })),
+      orbs: this.ctfOrbs.map(o => ({
+        team: o.team, state: o.state, x: Math.round(o.x), y: Math.round(o.y), holder: o.holder || 0,
+        returnIn: o.state === 'dropped' ? Math.max(0, CTF_RETURN_SEC*1000 - (now - o.droppedAt)) : 0,
+      })),
+    };
+    const s = JSON.stringify(payload);
+    for (const [ws] of this.clients) if (ws.readyState === WebSocket.OPEN) ws.send(s);
+  }
+  broadcastCtfEvent(type, team, byName) {
+    if (this.mode !== 'ctf') return;
+    const s = JSON.stringify({ t: 'ctfEvent', type, team, by: byName || '' });
+    for (const [ws] of this.clients) if (ws.readyState === WebSocket.OPEN) ws.send(s);
+  }
+
   // --- BATTLE ROYALE lifecycle ---
   _royaleTick(now, dt) {
     if (this.mode !== 'royale') return;
@@ -1228,6 +1482,7 @@ class Room {
     this.tickCount++;
     this._royaleTick(now, dt);
     this._domTick(now, dt);
+    this._ctfTick(now, dt);
     // Clean up disconnected snakes after 10 seconds
     for (const [name, snakeId] of this.disconnected) {
       const s = this.snakes.get(snakeId);
@@ -1315,14 +1570,15 @@ class Room {
     for(let i=0;i<arr.length;i++){
       const a=arr[i];if(!a.alive)continue;
       if(a.invincible>0) continue; // spawn invincibility
-      // Protected home base — a snake inside its own home can't be killed.
+      // Protected home base — a snake inside its own home/base can't be killed.
       if(this.mode==='domination'&&this._domInOwnHome(a)) continue;
+      if(this.mode==='ctf'&&this._ctfInOwnBase(a)) continue;
       const ahead=a.segments[0],aHeadR=HEAD_RADIUS*this._thickness(a)*0.75;
       for(let j=0;j<arr.length;j++){
         if(i===j)continue;
         const b=arr[j];if(!b.alive)continue;
         if(b.invincible>0) continue;
-        if((this.mode==='team'||this.mode==='domination')&&a.teamId>=0&&a.teamId===b.teamId) continue;
+        if((this.mode==='team'||this.mode==='domination'||this.mode==='ctf')&&a.teamId>=0&&a.teamId===b.teamId) continue;
         const bDotR=DOT_RADIUS*this._thickness(b)*0.75;
         const dist=aHeadR+bDotR,distSq=dist*dist;
         for(let k=1;k<b.segments.length;k++){
@@ -1585,6 +1841,7 @@ class Room {
       return;
     }
     if (this.mode === 'domination' && this._domSteerToObjective(s)) return;
+    if (this.mode === 'ctf' && this._ctfBotObjective(s)) return;
     const f = this._closestFood(s, 700);
     if (f) {
       s.targetAngle = Math.atan2(f.y - h.y, f.x - h.x);
@@ -1638,6 +1895,7 @@ class Room {
       return;
     }
     if (this.mode === 'domination' && this._domSteerToObjective(s)) return;
+    if (this.mode === 'ctf' && this._ctfBotObjective(s)) return;
     const f = this._bestFoodByValue(s, 900);
     if (f && !this._crowdedAt(f.x, f.y, 250, 3)) {
       s.targetAngle = Math.atan2(f.y - h.y, f.x - h.x);
@@ -1708,6 +1966,7 @@ class Room {
       return;
     }
     if (this.mode === 'domination' && this._domSteerToObjective(s)) return;
+    if (this.mode === 'ctf' && this._ctfBotObjective(s)) return;
     const bf = this._bestFoodByValue(s, 1300);
     if (bf && !this._crowdedAt(bf.x, bf.y, 280, 3)) {
       s.targetAngle = Math.atan2(bf.y - h.y, bf.x - h.x);
@@ -1769,13 +2028,14 @@ class Room {
 
   broadcastLeaderboard() {
     let entries;
-    if (this.mode === 'domination') {
-      // Domination leaderboard: each team's accumulated zone-control score
+    if (this.mode === 'domination' || this.mode === 'ctf') {
+      // Team-score leaderboard: zone-control points (domination) or captures (CTF)
       entries = [];
       for (const [teamId, team] of this.teams) {
         let kills = 0;
         for (const sid of team.memberIds) { const s = this.snakes.get(sid); if (s && s.alive) kills += s.kills; }
-        entries.push({ id: 60000 + teamId, score: Math.round(team.domScore), name: team.name, isBot: false, teamId, kills });
+        const score = this.mode === 'ctf' ? (team.ctfScore || 0) : Math.round(team.domScore);
+        entries.push({ id: 60000 + teamId, score, name: team.name, isBot: false, teamId, kills });
       }
       entries.sort((a,b) => b.score - a.score);
     } else if (this.mode === 'team') {
@@ -1837,6 +2097,7 @@ class RoomManager {
     this.createRoom('room-2', 'Team Battle', { mode: 'team', teamSize: 2, maxTeams: 8 });
     this.createRoom('room-3', 'Battle Royale', { mode: 'royale' });
     this.createRoom('room-4', 'Zone Domination', { mode: 'domination', numTeams: 2 });
+    this.createRoom('room-5', 'Capture the Orb', { mode: 'ctf' });
 
     // noServer mode: upgrade routing is handled in index.js so multiple
     // games (snake, click-battle) can share one Render service.
@@ -1855,7 +2116,7 @@ class RoomManager {
   }
 
   createCustomRoom(name, mode, teamSize, creatorName, royaleConfig, numTeams) {
-    if (!['solo', 'team', 'royale', 'domination'].includes(mode)) mode = 'solo';
+    if (!['solo', 'team', 'royale', 'domination', 'ctf'].includes(mode)) mode = 'solo';
     const id = `custom-${this.nextCustomId++}`;
     const opts = {
       mode,
@@ -1903,11 +2164,12 @@ class RoomManager {
         royaleState: room.mode === 'royale' ? room.royaleState : null,
         royaleCountdownMs: room.mode === 'royale' && room.royaleState === 'countdown'
           ? Math.max(0, room.royaleJoinDeadline - Date.now()) : null,
-        teams: (room.mode==='team'||room.mode==='domination') ? Array.from(room.teams.entries()).map(([tid,t])=>({
+        teams: (room.mode==='team'||room.mode==='domination'||room.mode==='ctf') ? Array.from(room.teams.entries()).map(([tid,t])=>({
           id:tid, name:t.name, color:t.color,
           members: t.memberIds.size,
         })) : null,
         domTimeLeft: room.mode==='domination' ? Math.max(0, room.domRoundEnd - Date.now()) : null,
+        ctfTimeLeft: room.mode==='ctf' ? Math.max(0, room.ctfRoundEnd - Date.now()) : null,
       });
     }
     return list;

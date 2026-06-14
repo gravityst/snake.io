@@ -1062,8 +1062,8 @@
   function getSegColor(snake, i) {
     // Zone Domination: color every snake by its team so red vs blue reads at a
     // glance. Banded (base / darker shade) keeps a little body texture.
-    if (domLayout && mpDom && snake.teamId >= 0) {
-      const base = domTeamColor(snake.teamId);
+    if (snake.teamId >= 0 && ((domLayout && mpDom) || (ctfLayout && mpCtf))) {
+      const base = (ctfLayout && mpCtf) ? ctfTeamColor(snake.teamId) : domTeamColor(snake.teamId);
       return (i % 4 < 2 || base.length !== 7) ? base : darken(base, 0.26);
     }
     const skin = SKINS[snake.skin]||SKINS[0]; return skin.colors[i%skin.colors.length];
@@ -1099,9 +1099,11 @@
     const cm = document.getElementById('classicModeBtn');
     const rm = document.getElementById('royaleModeBtn');
     const dm = document.getElementById('dominationModeBtn');
+    const cf = document.getElementById('ctfModeBtn');
     if (cm) cm.classList.toggle('active', selectedLocalMode === 'classic');
     if (rm) rm.classList.toggle('active', selectedLocalMode === 'royale');
     if (dm) dm.classList.toggle('active', selectedLocalMode === 'domination');
+    if (cf) cf.classList.toggle('active', selectedLocalMode === 'ctf');
     localStorage.setItem('selectedLocalMode', selectedLocalMode);
   }
   // --- Game state (must be declared before frame loop touches them) ---
@@ -1152,6 +1154,18 @@
   let selectedRole = parseInt(localStorage.getItem('domRole') || '0', 10) || 0;
   const ROLE_NAMES = ['Scout', 'Defender', 'Collector', 'Commander'];
   const ZONE_NORMAL = 0, ZONE_VIP = 1, ZONE_HOME = 2, ZONE_RESOURCE = 3;
+
+  // ---- Capture the Orb (multiplayer) ----
+  // ctfLayout: {mapW,mapH,roundMs,capturesToWin,teams:[{id,name,color}],bases:[{team,x,y,r}]}
+  // mpCtf: {state,timeLeft,endLeft,winner,capturesToWin,teams:[{id,score}],orbs:[{team,state,x,y,holder,returnIn}]}
+  let ctfLayout = null, mpCtf = null;
+  let ctfTeamById = new Map();   // id → {id,name,color}
+  let ctfBaseByTeam = new Map(); // team → {x,y,r}
+  let ctfBanner = null;          // { text, sub, color, life, total }
+  let ctfAlert = null;           // brief top alert { text, color, life }
+  let intendedCtf = false;
+  let ctfHandshakeTimer = null;
+  const CTF_ORB_R = 40, CTF_RETURN_MS = 8000;
 
   // --- Parallax starfield ---
   // Tints: white, soft teal, cool blue (no purple/pink).
@@ -1445,6 +1459,10 @@
   if (dominationModeBtn) {
     dominationModeBtn.addEventListener('click', () => { selectedLocalMode = 'domination'; applyModeSelection(); });
   }
+  const ctfModeBtn = document.getElementById('ctfModeBtn');
+  if (ctfModeBtn) {
+    ctfModeBtn.addEventListener('click', () => { selectedLocalMode = 'ctf'; applyModeSelection(); });
+  }
   applyModeSelection();
   updateProgressPanel();
 
@@ -1453,19 +1471,23 @@
   // Domination room (the bots are the AI opponents).
   function onPlayAI() {
     if (selectedLocalMode === 'domination') { playZoneDominationVsAI(); return; }
+    if (selectedLocalMode === 'ctf') { playCaptureTheOrbVsAI(); return; }
     startLocalGame();
   }
+  const RED_BLUE_TEAMS = [{ id:0, name:'Red', color:'#ff3b3b', members:0 },
+                          { id:1, name:'Blue', color:'#3b82f6', members:0 }];
   function playZoneDominationVsAI() {
     // 'room-4' is the standing Zone Domination room; open the role/team picker
     // instantly (bots fill both teams). pendingMode='domination' makes the join
     // send the role even though we skip the room-list fetch.
-    showTeamSelector('room-4',
-      [{ id:0, name:'Red',  color:'#ff3b3b', members:0 },
-       { id:1, name:'Blue', color:'#3b82f6', members:0 }],
-      'domination');
+    showTeamSelector('room-4', RED_BLUE_TEAMS, 'domination');
+  }
+  function playCaptureTheOrbVsAI() {
+    // 'room-5' is the standing Capture the Orb room (bots fill both teams).
+    showTeamSelector('room-5', RED_BLUE_TEAMS, 'ctf');
   }
   playAIBtn.addEventListener('click', onPlayAI);
-  nameInput.addEventListener('keydown', (e) => { if (e.key==='Enter') startLocalGame(); });
+  nameInput.addEventListener('keydown', (e) => { if (e.key==='Enter') onPlayAI(); });
   respawnBtn.addEventListener('click', () => {
     if (gameMode==='local') startLocalGame();
     else if (gameMode==='multiplayer') startMultiplayerGame(currentRoomId, selectedTeamId >= 0 ? selectedTeamId : undefined);
@@ -1497,6 +1519,8 @@
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
     mpDom = null; domLayout = null; domBanner = null; intendedDom = false;
     domStateById = new Map(); domZoneById = new Map(); domTeamById = new Map();
+    mpCtf = null; ctfLayout = null; ctfBanner = null; ctfAlert = null; intendedCtf = false;
+    ctfTeamById = new Map(); ctfBaseByTeam = new Map();
     hideAllScreens(); startScreen.style.display = 'flex';
   });
 
@@ -1560,6 +1584,7 @@
         hideAllScreens();
         if (mode === 'team') showTeamSelector(data.id, null, 'team');
         else if (mode === 'domination') showTeamSelector(data.id, null, 'domination');
+        else if (mode === 'ctf') showTeamSelector(data.id, null, 'ctf');
         else startMultiplayerGame(data.id);
       }
     } catch(e) { console.error('Create room failed:', e); }
@@ -1657,6 +1682,7 @@
       team:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="3"/><circle cx="17" cy="9" r="3"/><path d="M3 18c0-3 3-5 6-5s6 2 6 5"/><path d="M14 14c2 0 4 1.5 4 4"/></svg>`,
       royale: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19l3-12 4 7 2-4 2 4 4-7 3 12z"/></svg>`,
       domination: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><circle cx="12" cy="12" r="2"/></svg>`,
+      ctf: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg>`,
     };
 
     // Status badge for royale lobby/countdown
@@ -1673,6 +1699,7 @@
     const modeName = room.mode === 'royale' ? 'Battle Royale'
                    : room.mode === 'team'   ? `Team ${room.teamSize}v${room.teamSize}`
                    : room.mode === 'domination' ? 'Zone Domination'
+                   : room.mode === 'ctf' ? 'Capture the Orb'
                    : 'Free for All';
     const creatorLine = room.isCustom && room.creatorName
       ? `<span>by ${escapeHtml(room.creatorName)}</span><span class="sep">·</span>`
@@ -1720,7 +1747,7 @@
       card.addEventListener('click', () => {
         const joinRoom = () => {
           if (roomPollInterval) { clearInterval(roomPollInterval); roomPollInterval = null; }
-          if (room.mode === 'team' || room.mode === 'domination') showTeamSelector(room.id, room.teams, room.mode);
+          if (room.mode === 'team' || room.mode === 'domination' || room.mode === 'ctf') showTeamSelector(room.id, room.teams, room.mode);
           else startMultiplayerGame(room.id);
         };
         if (room.mode === 'royale') showBRJoinConfirm(room, joinRoom);
@@ -1940,8 +1967,10 @@
     // pendingMode covers the "Play vs AI → Zone Domination" path where the room
     // list may not be cached yet — ensures the role byte still gets sent.
     intendedDom = !!(cached && cached.mode === 'domination') || pendingMode === 'domination';
+    intendedCtf = !!(cached && cached.mode === 'ctf') || pendingMode === 'ctf';
     if (brHandshakeTimer) { clearTimeout(brHandshakeTimer); brHandshakeTimer = null; }
     if (domHandshakeTimer) { clearTimeout(domHandshakeTimer); domHandshakeTimer = null; }
+    if (ctfHandshakeTimer) { clearTimeout(ctfHandshakeTimer); ctfHandshakeTimer = null; }
     if (intendedDom) {
       domHandshakeTimer = setTimeout(() => {
         if (intendedDom && !domLayout) {
@@ -1950,6 +1979,16 @@
                 'automatically).');
         }
         domHandshakeTimer = null;
+      }, 4000);
+    }
+    if (intendedCtf) {
+      ctfHandshakeTimer = setTimeout(() => {
+        if (intendedCtf && !ctfLayout) {
+          alert('Capture the Orb isn\'t available on this server yet — it\'s running an\n' +
+                'older build. Try again in a couple of minutes (the server redeploys\n' +
+                'automatically).');
+        }
+        ctfHandshakeTimer = null;
       }, 4000);
     }
     if (intendedBR) {
@@ -1980,6 +2019,8 @@
     mpRoyale = null;  // reset BR state until first server packet arrives
     mpDom = null; domLayout = null; domBanner = null;       // reset domination state
     domStateById = new Map(); domZoneById = new Map(); domTeamById = new Map();
+    mpCtf = null; ctfLayout = null; ctfBanner = null; ctfAlert = null;  // reset CTF state
+    ctfTeamById = new Map(); ctfBaseByTeam = new Map();
     const name = nameInput.value.trim() || 'Player';
     connect(name, roomId, selectedTeamId);
     hideAllScreens(); hud.style.display='block'; document.body.style.cursor='crosshair'; running=true;
@@ -2325,7 +2366,7 @@
     ws.onmessage = (event) => {
       if (connId !== myConnId) return; // stale connection
       // Zone Domination meta-state arrives as JSON text frames (binary state stays binary).
-      if (typeof event.data === 'string') { handleDomMessage(event.data); return; }
+      if (typeof event.data === 'string') { handleServerJson(event.data); return; }
       const buf = new DataView(event.data);
       if (buf.byteLength<1) return;
       const type = buf.getUint8(0);
@@ -2431,8 +2472,14 @@
   }
 
   // Zone Domination JSON frames: 'domLayout' (board), 'domState' (live), 'domEvent' (banner).
-  function handleDomMessage(str) {
+  // All JSON text frames (domination + CTF meta-state) route through here.
+  function handleServerJson(str) {
     let m; try { m = JSON.parse(str); } catch { return; }
+    if (typeof m.t !== 'string') return;
+    if (m.t.startsWith('dom')) handleDomMessage(m);
+    else if (m.t.startsWith('ctf')) handleCtfMessage(m);
+  }
+  function handleDomMessage(m) {
     if (m.t === 'domLayout') {
       domLayout = m;
       domZoneById = new Map(m.zones.map(z => [z.id, z]));
@@ -2456,6 +2503,41 @@
     }[type] || { text:String(type).toUpperCase(), sub:'', color:'#0ff' };
     domBanner = { ...info, life: 3.6, total: 3.6 };
     screenShake = Math.max(screenShake, 8);
+  }
+
+  function handleCtfMessage(m) {
+    if (m.t === 'ctfLayout') {
+      ctfLayout = m;
+      ctfTeamById = new Map(m.teams.map(t => [t.id, t]));
+      ctfBaseByTeam = new Map(m.bases.map(b => [b.team, b]));
+      if (!mpCtf) mpCtf = { state:'active', timeLeft:m.roundMs, endLeft:0, winner:-1, capturesToWin:m.capturesToWin, teams:[], orbs:[] };
+      if (ctfHandshakeTimer) { clearTimeout(ctfHandshakeTimer); ctfHandshakeTimer = null; }
+    } else if (m.t === 'ctfState') {
+      mpCtf = m;
+      if (ctfHandshakeTimer) { clearTimeout(ctfHandshakeTimer); ctfHandshakeTimer = null; }
+    } else if (m.t === 'ctfEvent') {
+      pushCtfEvent(m);
+    }
+  }
+  function ctfTeamName(team) { const t = ctfTeamById.get(team); return t ? t.name : (team === 0 ? 'Red' : 'Blue'); }
+  function ctfTeamColor(team) { const t = ctfTeamById.get(team); return (t && t.color) || (team === 0 ? '#ff3b3b' : '#3b82f6'); }
+  function pushCtfEvent(m) {
+    const myTeam = selectedTeamId;
+    const tName = ctfTeamName(m.team), tCol = ctfTeamColor(m.team);
+    if (m.t !== 'ctfEvent') return;
+    if (m.type === 'capture') {
+      const mine = m.team === myTeam;
+      ctfBanner = { text: mine ? 'CAPTURED!' : `${tName.toUpperCase()} SCORES`, sub: `${m.by || tName} delivered the orb`, color: tCol, life: 3.2, total: 3.2 };
+      screenShake = Math.max(screenShake, 12);
+    } else if (m.type === 'steal') {
+      // m.team = the team whose orb was stolen
+      const mine = m.team === myTeam;
+      ctfAlert = { text: mine ? '⚠ YOUR ORB WAS STOLEN!' : `${tName} orb taken by ${m.by || 'enemy'}`, color: mine ? '#fb7185' : tCol, life: 2.6 };
+    } else if (m.type === 'return') {
+      ctfAlert = { text: `${tName} orb returned`, color: tCol, life: 2.0 };
+    } else if (m.type === 'drop') {
+      ctfAlert = { text: `${tName} orb dropped — grab it!`, color: tCol, life: 2.0 };
+    }
   }
 
   function parseState(buf) {
@@ -2757,9 +2839,9 @@
   }
 
   function drawBorder(cx,cy) {
-    // Zone Domination plays on a wide rectangle; everything else on the square.
-    const w = (domLayout && mpDom) ? domLayout.mapW : MAP_SIZE;
-    const h = (domLayout && mpDom) ? domLayout.mapH : MAP_SIZE;
+    // Domination & CTF play on rectangles; everything else on the square.
+    const w = (domLayout && mpDom) ? domLayout.mapW : (ctfLayout && mpCtf) ? ctfLayout.mapW : MAP_SIZE;
+    const h = (domLayout && mpDom) ? domLayout.mapH : (ctfLayout && mpCtf) ? ctfLayout.mapH : MAP_SIZE;
     const sx=-w/2-cx+canvas.width/2,sy=-h/2-cy+canvas.height/2;
     ctx.strokeStyle='rgba(255,60,60,0.5)'; ctx.lineWidth=4; ctx.strokeRect(sx,sy,w,h);
   }
@@ -3490,6 +3572,90 @@
     }
   }
 
+  // ---- Capture the Orb HUD ----
+  function drawCtfPill(x, y, w, h, team, alignRight, isLeader) {
+    ctx.fillStyle = 'rgba(8,12,28,0.82)';
+    ctx.strokeStyle = isLeader ? team.color : hexA(team.color, 0.45);
+    roundRect(ctx, x, y, w, h, 10); ctx.fill(); ctx.lineWidth = isLeader ? 2 : 1.2; ctx.stroke();
+    const sw = 8;
+    ctx.fillStyle = team.color; ctx.shadowColor = team.color; ctx.shadowBlur = 8;
+    roundRect(ctx, alignRight ? x + w - sw - 4 : x + 4, y + 6, sw, h - 12, 3); ctx.fill(); ctx.shadowBlur = 0;
+    const tx = alignRight ? x + w - 18 : x + 18;
+    ctx.textAlign = alignRight ? 'right' : 'left';
+    ctx.fillStyle = '#eef5ff'; ctx.font = "800 13px 'Inter',sans-serif";
+    ctx.fillText((isLeader ? '👑 ' : '') + team.name, tx, y + 14);
+    ctx.font = "800 24px 'Space Grotesk','Inter',sans-serif"; ctx.fillStyle = team.color;
+    ctx.fillText(String(team.score), tx, y + 31);
+  }
+  function drawCtfHUD(dt) {
+    if (!mpCtf || !ctfLayout) return;
+    const W = canvas.width, H = canvas.height;
+    if (ctfBanner) { ctfBanner.life -= dt; if (ctfBanner.life <= 0) ctfBanner = null; }
+    if (ctfAlert)  { ctfAlert.life  -= dt; if (ctfAlert.life  <= 0) ctfAlert  = null; }
+    const toWin = mpCtf.capturesToWin || 3;
+    const teams = (mpCtf.teams || []).map(t => ({ id: t.id, score: t.score || 0, name: ctfTeamName(t.id), color: ctfTeamColor(t.id) })).sort((a,b) => a.id - b.id);
+    const top = Math.max(0, ...teams.map(t => t.score));
+
+    ctx.save(); ctx.textBaseline = 'middle';
+    // Timer + "first to N"
+    const secs = Math.max(0, Math.ceil((mpCtf.timeLeft||0)/1000));
+    const timeStr = `${Math.floor(secs/60)}:${(secs%60)<10?'0':''}${secs%60}`;
+    const tpw = 86, tph = 40, tpx = W/2 - tpw/2, tpy = 12;
+    ctx.fillStyle = 'rgba(8,12,28,0.85)'; ctx.strokeStyle = 'rgba(120,200,255,0.5)';
+    roundRect(ctx, tpx, tpy, tpw, tph, 10); ctx.fill(); ctx.lineWidth = 1.4; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.fillStyle = '#9fb3c8'; ctx.font = "700 8px 'Inter',sans-serif"; ctx.fillText('TIME', W/2, tpy + 11);
+    ctx.fillStyle = '#e8f4ff'; ctx.font = "800 19px 'Space Grotesk','Inter',sans-serif"; ctx.fillText(timeStr, W/2, tpy + 27);
+    ctx.fillStyle = 'rgba(148,163,184,0.85)'; ctx.font = "700 9px 'Inter',sans-serif"; ctx.fillText(`FIRST TO ${toWin}`, W/2, tpy + tph + 9);
+    // Team pills flanking the timer
+    const pillW = 180, pillH = 44;
+    if (teams.length >= 2) {
+      drawCtfPill(tpx - 12 - pillW, 10, pillW, pillH, teams[0], false, teams[0].score === top && top > 0 && teams[0].score !== teams[1].score);
+      drawCtfPill(tpx + tpw + 12, 10, pillW, pillH, teams[1], true,  teams[1].score === top && top > 0 && teams[0].score !== teams[1].score);
+    }
+    ctx.restore();
+
+    // Transient alert (orb stolen / returned / dropped)
+    if (ctfAlert) {
+      ctx.save(); ctx.textAlign = 'center';
+      ctx.globalAlpha = Math.min(1, ctfAlert.life / 0.4);
+      ctx.font = "800 15px 'Inter',sans-serif"; ctx.fillStyle = ctfAlert.color;
+      ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 8;
+      ctx.fillText(ctfAlert.text, W/2, 96); ctx.restore();
+    }
+
+    // Big banner (capture / score)
+    if (ctfBanner) {
+      const tf = ctfBanner.life / ctfBanner.total;
+      const a = tf > 0.8 ? (1 - tf) / 0.2 : tf < 0.25 ? tf / 0.25 : 1;
+      ctx.save(); ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = "800 46px 'Space Grotesk','Inter',sans-serif"; ctx.fillStyle = ctfBanner.color;
+      ctx.shadowColor = ctfBanner.color; ctx.shadowBlur = 30; ctx.fillText(ctfBanner.text, W/2, H*0.26); ctx.shadowBlur = 0;
+      ctx.font = "600 15px 'Inter',sans-serif"; ctx.fillStyle = '#e8f0ff'; ctx.fillText(ctfBanner.sub, W/2, H*0.26 + 36);
+      ctx.restore();
+    }
+
+    // Match-over overlay
+    if (mpCtf.state === 'ended') {
+      const win = mpCtf.winner >= 0 ? ctfTeamName(mpCtf.winner) : null;
+      const wc = mpCtf.winner >= 0 ? ctfTeamColor(mpCtf.winner) : '#94a3b8';
+      ctx.save(); ctx.fillStyle = 'rgba(6,8,26,0.78)'; ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = "800 13px 'Inter',sans-serif"; ctx.fillStyle = 'rgba(200,215,230,0.85)'; ctx.fillText('MATCH OVER', W/2, H/2 - 90);
+      ctx.font = "800 54px 'Space Grotesk','Inter',sans-serif"; ctx.fillStyle = wc; ctx.shadowColor = wc; ctx.shadowBlur = 34;
+      ctx.fillText(win ? `${win.toUpperCase()} WINS` : 'DRAW', W/2, H/2 - 30); ctx.shadowBlur = 0;
+      ctx.font = "700 18px 'Inter',sans-serif";
+      let ry = H/2 + 28;
+      for (const tm of teams.slice().sort((a,b) => b.score - a.score)) {
+        ctx.fillStyle = tm.color; ctx.textAlign = 'right'; ctx.fillText(tm.name, W/2 - 14, ry);
+        ctx.fillStyle = '#eef5ff'; ctx.textAlign = 'left'; ctx.fillText(String(tm.score), W/2 + 14, ry); ry += 28;
+      }
+      const nextS = Math.ceil((mpCtf.endLeft||0)/1000);
+      ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(180,200,220,0.75)'; ctx.font = "500 13px 'Inter',sans-serif";
+      ctx.fillText(`Next round in ${nextS}s`, W/2, ry + 14);
+      ctx.restore();
+    }
+  }
+
   function showRoyaleSealedNotice() {
     royaleSealedTimer = 4.0;
     try {
@@ -3708,6 +3874,52 @@
       if (owner>=0 && z.type !== ZONE_HOME && zs.l > 0) drawLevelPips(sx, sy + r - 16, zs.l, ownColor);
     }
     ctx.lineCap = 'butt';
+  }
+
+  // ---- Capture the Orb world rendering: bases + orbs + carrier beams ----
+  function drawCtfField(cx, cy) {
+    if (!ctfLayout || !mpCtf) return;
+    const midX = canvas.width/2, midY = canvas.height/2;
+    const toX = wx => wx - cx + midX, toY = wy => wy - cy + midY;
+
+    // Bases — glowing goal rings with a pedestal at the centre
+    for (const b of ctfLayout.bases) {
+      const sx = toX(b.x), sy = toY(b.y), col = ctfTeamColor(b.team);
+      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, b.r);
+      g.addColorStop(0, hexA(col, 0.16)); g.addColorStop(1, hexA(col, 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx, sy, b.r, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = hexA(col, 0.65); ctx.lineWidth = 5/zoom;
+      ctx.setLineDash([18/zoom, 12/zoom]); ctx.lineDashOffset = -animTime*20;
+      ctx.beginPath(); ctx.arc(sx, sy, b.r, 0, Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = hexA(col, 0.4); ctx.beginPath(); ctx.arc(sx, sy, 34, 0, Math.PI*2); ctx.fill();
+    }
+
+    // Orbs
+    for (const orb of (mpCtf.orbs || [])) {
+      const sx = toX(orb.x), sy = toY(orb.y), col = ctfTeamColor(orb.team);
+      // carried → dashed beam toward the carrier's delivery base
+      if (orb.state === 'carried') {
+        const dest = ctfBaseByTeam.get(orb.team === 0 ? 1 : 0);
+        if (dest) {
+          ctx.strokeStyle = hexA(col, 0.35); ctx.lineWidth = 3/zoom;
+          ctx.setLineDash([10/zoom, 10/zoom]); ctx.lineDashOffset = -animTime*30;
+          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(toX(dest.x), toY(dest.y)); ctx.stroke(); ctx.setLineDash([]);
+        }
+      }
+      // dropped → return-timer ring
+      if (orb.state === 'dropped') {
+        const frac = Math.max(0, Math.min(1, (orb.returnIn || 0) / CTF_RETURN_MS));
+        ctx.strokeStyle = hexA(col, 0.85); ctx.lineWidth = 4/zoom;
+        ctx.beginPath(); ctx.arc(sx, sy, CTF_ORB_R + 16, -Math.PI/2, -Math.PI/2 + Math.PI*2*frac); ctx.stroke();
+      }
+      const pulse = 1 + 0.12*Math.sin(animTime*4 + orb.team);
+      const r = CTF_ORB_R * pulse;
+      const gg = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
+      gg.addColorStop(0, '#ffffff'); gg.addColorStop(0.4, col); gg.addColorStop(1, hexA(col, 0.2));
+      ctx.fillStyle = gg; ctx.shadowColor = col; ctx.shadowBlur = orb.state === 'carried' ? 30 : 18;
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2/zoom; ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI*2); ctx.stroke();
+    }
   }
 
   function drawFood(cx,cy) {
@@ -4123,8 +4335,8 @@
     minimapCtx.fillStyle='rgba(0,10,20,0.6)';minimapCtx.fillRect(0,0,w,h);
     minimapCtx.strokeStyle='rgba(0,255,255,0.3)';minimapCtx.lineWidth=1;minimapCtx.strokeRect(0,0,w,h);
     // Domination uses a wide rectangle — fit it (uniform scale) into the minimap.
-    const mmMapW = (domLayout && mpDom) ? domLayout.mapW : MAP_SIZE;
-    const mmMapH = (domLayout && mpDom) ? domLayout.mapH : MAP_SIZE;
+    const mmMapW = (domLayout && mpDom) ? domLayout.mapW : (ctfLayout && mpCtf) ? ctfLayout.mapW : MAP_SIZE;
+    const mmMapH = (domLayout && mpDom) ? domLayout.mapH : (ctfLayout && mpCtf) ? ctfLayout.mapH : MAP_SIZE;
     const scale=Math.min(w/mmMapW, h/mmMapH),ox=w/2,oy=h/2;
     // Battle Royale safe zone — red danger fill + safe-zone ring + target preview
     if (localGame && localGame.mode === 'royale') {
@@ -4181,15 +4393,30 @@
         if (z.type === ZONE_VIP) { minimapCtx.strokeStyle = '#ffd84d'; minimapCtx.lineWidth = 1.5; minimapCtx.stroke(); }
       }
     }
+    // Capture the Orb — bases (rings) + orbs (team-colored dots, ringed if loose)
+    if (ctfLayout && mpCtf) {
+      for (const b of ctfLayout.bases) {
+        minimapCtx.strokeStyle = hexA(ctfTeamColor(b.team), 0.7); minimapCtx.lineWidth = 1.5;
+        minimapCtx.beginPath(); minimapCtx.arc(b.x*scale+ox, b.y*scale+oy, b.r*scale, 0, Math.PI*2); minimapCtx.stroke();
+      }
+      for (const orb of (mpCtf.orbs || [])) {
+        minimapCtx.fillStyle = ctfTeamColor(orb.team);
+        minimapCtx.shadowColor = ctfTeamColor(orb.team); minimapCtx.shadowBlur = orb.state !== 'base' ? 6 : 0;
+        minimapCtx.beginPath(); minimapCtx.arc(orb.x*scale+ox, orb.y*scale+oy, 3.5, 0, Math.PI*2); minimapCtx.fill();
+        minimapCtx.shadowBlur = 0;
+        if (orb.state !== 'base') { minimapCtx.strokeStyle = '#fff'; minimapCtx.lineWidth = 1; minimapCtx.beginPath(); minimapCtx.arc(orb.x*scale+ox, orb.y*scale+oy, 5.5, 0, Math.PI*2); minimapCtx.stroke(); }
+      }
+    }
     const megaPulse=0.7+0.3*Math.sin(animTime*4);
     for(const m of megaOrbs){minimapCtx.fillStyle=COLORS[m.color];minimapCtx.globalAlpha=megaPulse;minimapCtx.beginPath();minimapCtx.arc(m.x*scale+ox,m.y*scale+oy,3,0,Math.PI*2);minimapCtx.fill();}
     minimapCtx.globalAlpha=1;
     for(const snake of snakes){
       if(!snake.alive||snake.segments.length===0) continue;
       const head=snake.segments[0];
-      // Domination: color heads by team so friend/foe reads at a glance.
+      // Team modes: color heads by team so friend/foe reads at a glance.
       minimapCtx.fillStyle = snake.id===myId ? '#fff'
         : (domLayout && mpDom && snake.teamId>=0) ? domTeamColor(snake.teamId)
+        : (ctfLayout && mpCtf && snake.teamId>=0) ? ctfTeamColor(snake.teamId)
         : getSegColor(snake,0);
       minimapCtx.globalAlpha=snake.id===myId?1:0.6;
       minimapCtx.beginPath();minimapCtx.arc(head.x*scale+ox,head.y*scale+oy,snake.id===myId?3:2,0,Math.PI*2);minimapCtx.fill();
@@ -4368,7 +4595,7 @@
 
     ctx.save();
     ctx.translate(canvas.width/2,canvas.height/2);ctx.scale(zoom,zoom);ctx.translate(-canvas.width/2,-canvas.height/2);
-    drawStars(cx,cy); drawHexGrid(cx,cy); if(showGrid) drawGrid(cx,cy); drawBorder(cx,cy); drawRoyaleRing(cx,cy); drawDominationZones(cx,cy); drawFood(cx,cy); drawMegaOrbs(cx,cy);
+    drawStars(cx,cy); drawHexGrid(cx,cy); if(showGrid) drawGrid(cx,cy); drawBorder(cx,cy); drawRoyaleRing(cx,cy); drawDominationZones(cx,cy); drawCtfField(cx,cy); drawFood(cx,cy); drawMegaOrbs(cx,cy);
     const me=snakes.find(s=>s.id===myId);
     for(const snake of snakes){if(snake.alive&&snake.id!==myId)drawSnake(snake,cx,cy);}
     if(me&&me.alive) drawSnake(me,cx,cy);
@@ -4407,6 +4634,7 @@
     }
     drawRoyaleHUD(dt, cx, cy);
     drawDominationHUD(dt);
+    drawCtfHUD(dt);
     // SPECTATING pill while watching after elimination
     if (spectatingBR) {
       ctx.save();

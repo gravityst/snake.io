@@ -330,7 +330,7 @@
     /* Mode toggle (Classic vs Battle Royale, AI only) */
     .mode-toggle {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 4px;
       padding: 4px;
       background: var(--surface);
@@ -1387,6 +1387,10 @@
             <span class="mode-tab-title">Zone Domination</span>
             <span class="mode-tab-sub">Capture &middot; Hold</span>
           </button>
+          <button class="mode-tab" id="ctfModeBtn" type="button">
+            <span class="mode-tab-title">Capture the Orb</span>
+            <span class="mode-tab-sub">Steal &middot; Deliver</span>
+          </button>
         </div>
 
         <div class="online-indicator">
@@ -1432,6 +1436,7 @@
         <button class="filter-tab royale" data-filter="royale">Battle Royale</button>
         <button class="filter-tab team" data-filter="team">Team</button>
         <button class="filter-tab" data-filter="domination">Domination</button>
+        <button class="filter-tab" data-filter="ctf">Capture</button>
       </div>
       <!-- Search -->
       <div class="room-search-bar">
@@ -1503,6 +1508,7 @@
             <option value="team">Team Battle</option>
             <option value="royale">Battle Royale &mdash; Last snake standing</option>
             <option value="domination">Zone Domination &mdash; Capture &amp; hold zones</option>
+            <option value="ctf">Capture the Orb &mdash; Steal &amp; deliver</option>
           </select>
         </div>
         <div class="field" id="teamSizeField" style="display:none;">
@@ -1824,7 +1830,7 @@
       update();
     })();
   </script>
-  <script src="local-game.js?v=49"></script>
-  <script src="game.js?v=49"></script>
+  <script src="local-game.js?v=50"></script>
+  <script src="game.js?v=50"></script>
 </body>
 </html>
