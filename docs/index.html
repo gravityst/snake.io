@@ -1425,6 +1425,7 @@
         <button class="filter-tab" data-filter="solo">Solo</button>
         <button class="filter-tab royale" data-filter="royale">Battle Royale</button>
         <button class="filter-tab team" data-filter="team">Team</button>
+        <button class="filter-tab" data-filter="domination">Domination</button>
       </div>
       <!-- Search -->
       <div class="room-search-bar">
@@ -1495,6 +1496,7 @@
             <option value="solo" selected>Normal &mdash; Free for All</option>
             <option value="team">Team Battle</option>
             <option value="royale">Battle Royale &mdash; Last snake standing</option>
+            <option value="domination">Zone Domination &mdash; Capture &amp; hold zones</option>
           </select>
         </div>
         <div class="field" id="teamSizeField" style="display:none;">
@@ -1502,6 +1504,14 @@
           <select id="roomTeamSizeSelect" class="select">
             <option value="2">2 players per team</option>
             <option value="3">3 players per team</option>
+          </select>
+        </div>
+        <div class="field" id="domTeamsField" style="display:none;">
+          <div class="field-label">Number of teams</div>
+          <select id="roomDomTeams" class="select">
+            <option value="2" selected>2 teams &mdash; tug of war</option>
+            <option value="3">3 teams &mdash; free-for-all</option>
+            <option value="4">4 teams &mdash; four corners</option>
           </select>
         </div>
         <!-- BR-only settings panel ----------------------------------------->
@@ -1808,7 +1818,7 @@
       update();
     })();
   </script>
-  <script src="local-game.js?v=47"></script>
-  <script src="game.js?v=47"></script>
+  <script src="local-game.js?v=48"></script>
+  <script src="game.js?v=48"></script>
 </body>
 </html>

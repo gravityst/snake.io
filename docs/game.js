@@ -1129,6 +1129,20 @@
   // Ephemeral banner notifications (e.g. "ZONE IS NOW CLOSING")
   let royaleBanners = []; // { text, sub, color, life, total }
 
+  // ---- Zone Domination (multiplayer) ----
+  // domLayout: static-ish board {v,mapW,mapH,roundMs,teams:[{id,name,color}],zones:[{id,x,y,r,type,home,core,adj}]}
+  // mpDom: frequent state {state,timeLeft,endLeft,overtime,winner,event,teams:[{id,score,res}],zones:[{id,o,p,l,cap,core,hot,grp}]}
+  let domLayout = null, mpDom = null;
+  let domZoneById = new Map();   // id → layout zone
+  let domTeamById = new Map();   // id → {id,name,color}
+  let domStateById = new Map();  // id → live zone state
+  let domBanner = null;          // { text, sub, color, life, total }
+  let intendedDom = false;       // joined a domination room — guards the old-server fallback
+  let domHandshakeTimer = null;
+  let selectedRole = parseInt(localStorage.getItem('domRole') || '0', 10) || 0;
+  const ROLE_NAMES = ['Scout', 'Defender', 'Collector', 'Commander'];
+  const ZONE_NORMAL = 0, ZONE_VIP = 1, ZONE_HOME = 2, ZONE_RESOURCE = 3;
+
   // --- Parallax starfield ---
   // Tints: white, soft teal, cool blue (no purple/pink).
   const STAR_TINTS = ['#ffffff', '#ffffff', '#ffffff', '#7dd3fc', '#5eead4', '#cffafe'];
@@ -1451,6 +1465,8 @@
     zoom = BASE_ZOOM; lastScore = 0; displayScore = 0; prevScore = 0;
     myKills = 0; scorePopups = []; killFeed = [];
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
+    mpDom = null; domLayout = null; domBanner = null; intendedDom = false;
+    domStateById = new Map(); domZoneById = new Map(); domTeamById = new Map();
     hideAllScreens(); startScreen.style.display = 'flex';
   });
 
@@ -1475,6 +1491,8 @@
     if (teamWrap) teamWrap.style.display = m==='team' ? 'block' : 'none';
     const brPanel = document.getElementById('brSettingsPanel');
     if (brPanel) brPanel.style.display = m==='royale' ? 'block' : 'none';
+    const domWrap = document.getElementById('domTeamsField');
+    if (domWrap) domWrap.style.display = m==='domination' ? 'block' : 'none';
   });
   function gatherBRConfig() {
     const sizeMap = { max: 0, large: 5000, medium: 3500, tight: 2000 };
@@ -1496,11 +1514,13 @@
     const mode = roomModeSelect.value;
     const teamSize = parseInt(roomTeamSizeSelect.value) || 2;
     const royaleConfig = mode === 'royale' ? gatherBRConfig() : null;
+    const numTeams = mode === 'domination'
+      ? (parseInt((document.getElementById('roomDomTeams')||{}).value) || 2) : 2;
     try {
       const res = await fetch(SERVER_URL + '/api/rooms', {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
-          name: rName, mode, teamSize,
+          name: rName, mode, teamSize, numTeams,
           creatorName: nameInput.value.trim(),
           royaleConfig,
         }),
@@ -1508,7 +1528,8 @@
       const data = await res.json();
       if (data.id) {
         hideAllScreens();
-        if (mode === 'team') showTeamSelector(data.id);
+        if (mode === 'team') showTeamSelector(data.id, null, 'team');
+        else if (mode === 'domination') showTeamSelector(data.id, null, 'domination');
         else startMultiplayerGame(data.id);
       }
     } catch(e) { console.error('Create room failed:', e); }
@@ -1605,6 +1626,7 @@
       solo:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>`,
       team:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="3"/><circle cx="17" cy="9" r="3"/><path d="M3 18c0-3 3-5 6-5s6 2 6 5"/><path d="M14 14c2 0 4 1.5 4 4"/></svg>`,
       royale: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19l3-12 4 7 2-4 2 4 4-7 3 12z"/></svg>`,
+      domination: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><circle cx="12" cy="12" r="2"/></svg>`,
     };
 
     // Status badge for royale lobby/countdown
@@ -1620,6 +1642,7 @@
     const customBadge = room.isCustom ? `<span class="mode-badge custom">CUSTOM</span>` : '';
     const modeName = room.mode === 'royale' ? 'Battle Royale'
                    : room.mode === 'team'   ? `Team ${room.teamSize}v${room.teamSize}`
+                   : room.mode === 'domination' ? 'Zone Domination'
                    : 'Free for All';
     const creatorLine = room.isCustom && room.creatorName
       ? `<span>by ${escapeHtml(room.creatorName)}</span><span class="sep">·</span>`
@@ -1667,7 +1690,7 @@
       card.addEventListener('click', () => {
         const joinRoom = () => {
           if (roomPollInterval) { clearInterval(roomPollInterval); roomPollInterval = null; }
-          if (room.mode === 'team') showTeamSelector(room.id, room.teams);
+          if (room.mode === 'team' || room.mode === 'domination') showTeamSelector(room.id, room.teams, room.mode);
           else startMultiplayerGame(room.id);
         };
         if (room.mode === 'royale') showBRJoinConfirm(room, joinRoom);
@@ -1734,10 +1757,18 @@
   let pendingRoomId = null;
   let selectedTeamId = -1;
 
-  function showTeamSelector(roomId, teams) {
+  let pendingMode = 'team';
+  function showTeamSelector(roomId, teams, mode) {
     pendingRoomId = roomId;
+    pendingMode = mode || 'team';
     hideAllScreens();
     teamScreen.style.display = 'flex';
+    // Retitle the screen for domination (role + team)
+    const titleEl = teamScreen.querySelector('.screen-title');
+    const subEl = teamScreen.querySelector('.screen-title-sub');
+    if (titleEl) titleEl.textContent = pendingMode === 'domination' ? 'Choose Role & Team' : 'Pick Your Team';
+    if (subEl) subEl.textContent = pendingMode === 'domination'
+      ? 'Roles give territorial edges — never speed or growth' : 'Choose a color to fight alongside';
     teamGrid.innerHTML = '';
     // If we have team data, show it. Otherwise fetch fresh.
     if (teams) renderTeams(teams);
@@ -1747,14 +1778,47 @@
     });
   }
 
+  // Zone Domination roles — territorial modifiers only (no stat boosts).
+  const DOM_ROLE_INFO = [
+    ['Scout',     '👁', 'Wider battlefield vision'],
+    ['Defender',  '🛡', 'Slows enemies taking your zones'],
+    ['Collector', '⬡', 'Eating funds the team economy'],
+    ['Commander', '★', 'Captures faster — rally the team'],
+  ];
   function renderTeams(teams) {
     teamGrid.innerHTML = '';
+    // Domination: a full-width role picker above the team cards
+    if (pendingMode === 'domination') {
+      const row = document.createElement('div');
+      row.style.cssText = 'grid-column:1/-1; display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-bottom:4px;';
+      DOM_ROLE_INFO.forEach((ri, i) => {
+        const b = document.createElement('button');
+        const active = i === selectedRole;
+        b.style.cssText = `flex:1 1 120px; max-width:200px; cursor:pointer; text-align:center;
+          padding:12px 10px; border-radius:12px; transition:all .15s ease;
+          background:${active ? 'rgba(94,234,212,0.14)' : 'rgba(255,255,255,0.04)'};
+          border:1px solid ${active ? 'rgba(94,234,212,0.7)' : 'rgba(255,255,255,0.1)'};
+          color:#eef5ff; font-family:'Inter',sans-serif;`;
+        b.innerHTML = `<div style="font-size:20px;line-height:1">${ri[1]}</div>
+          <div style="font-weight:800;font-size:13px;margin-top:5px">${ri[0]}</div>
+          <div style="font-size:10px;color:#9fb3c8;margin-top:3px;line-height:1.3">${ri[2]}</div>`;
+        b.addEventListener('click', () => { selectedRole = i; localStorage.setItem('domRole', String(i)); renderTeams(teams); });
+        row.appendChild(b);
+      });
+      teamGrid.appendChild(row);
+      const hint = document.createElement('div');
+      hint.style.cssText = 'grid-column:1/-1; text-align:center; color:#9fb3c8; font-size:12px; margin:6px 0 4px;';
+      hint.textContent = 'Then pick a team to deploy →';
+      teamGrid.appendChild(hint);
+    }
     for (const team of teams) {
       const card = document.createElement('div');
       card.className = 'team-card';
+      const label = pendingMode === 'domination'
+        ? `${team.members} on team` : `${team.members} ${team.members === 1 ? 'bot' : 'bots'}`;
       card.innerHTML = `<div class="team-color" style="background:${team.color};box-shadow:0 0 10px ${team.color}"></div>
         <div class="team-name">${team.name}</div>
-        <div class="team-count">${team.members} ${team.members === 1 ? 'bot' : 'bots'}</div>`;
+        <div class="team-count">${label}</div>`;
       card.addEventListener('click', () => {
         selectedTeamId = team.id;
         startMultiplayerGame(pendingRoomId, team.id);
@@ -1843,7 +1907,19 @@
     // Track whether the room we're joining is BR (room data was last cached)
     const cached = (lastRoomData || []).find(r => r.id === roomId);
     intendedBR = !!(cached && cached.mode === 'royale');
+    intendedDom = !!(cached && cached.mode === 'domination');
     if (brHandshakeTimer) { clearTimeout(brHandshakeTimer); brHandshakeTimer = null; }
+    if (domHandshakeTimer) { clearTimeout(domHandshakeTimer); domHandshakeTimer = null; }
+    if (intendedDom) {
+      domHandshakeTimer = setTimeout(() => {
+        if (intendedDom && !domLayout) {
+          alert('Zone Domination isn\'t available on this server yet — it\'s running an\n' +
+                'older build. Try again in a couple of minutes (the server redeploys\n' +
+                'automatically).');
+        }
+        domHandshakeTimer = null;
+      }, 4000);
+    }
     if (intendedBR) {
       // Give the server up to 4s to send any 0x08 royale-state packet.
       // If none arrives, the server is running an older build that doesn't
@@ -1870,6 +1946,8 @@
     currentRoomId = roomId;
     selectedTeamId = teamId ?? -1;
     mpRoyale = null;  // reset BR state until first server packet arrives
+    mpDom = null; domLayout = null; domBanner = null;       // reset domination state
+    domStateById = new Map(); domZoneById = new Map(); domTeamById = new Map();
     const name = nameInput.value.trim() || 'Player';
     connect(name, roomId, selectedTeamId);
     hideAllScreens(); hud.style.display='block'; document.body.style.cursor='crosshair'; running=true;
@@ -2203,14 +2281,19 @@
       if (connId !== myConnId) return; // stale connection
       const nameBytes = new TextEncoder().encode(name.substring(0,16));
       const hasTeam = teamId !== undefined && teamId >= 0;
-      const buf = new Uint8Array((hasTeam ? 4 : 3) + nameBytes.length);
+      const hasRole = intendedDom && hasTeam; // domination join carries a role byte
+      const buf = new Uint8Array(3 + (hasTeam?1:0) + (hasRole?1:0) + nameBytes.length);
       buf[0]=0x03; buf[1]=selectedSkin; buf[2]=selectedAccessory;
-      if (hasTeam) { buf[3]=teamId; buf.set(nameBytes,4); }
-      else buf.set(nameBytes,3);
+      let off = 3;
+      if (hasTeam) buf[off++] = teamId;
+      if (hasRole) buf[off++] = selectedRole;
+      buf.set(nameBytes, off);
       ws.send(buf);
     };
     ws.onmessage = (event) => {
       if (connId !== myConnId) return; // stale connection
+      // Zone Domination meta-state arrives as JSON text frames (binary state stays binary).
+      if (typeof event.data === 'string') { handleDomMessage(event.data); return; }
       const buf = new DataView(event.data);
       if (buf.byteLength<1) return;
       const type = buf.getUint8(0);
@@ -2313,6 +2396,34 @@
         setTimeout(() => { if (connId === myConnId) connect(name,roomId,teamId); }, 2000);
       }
     };
+  }
+
+  // Zone Domination JSON frames: 'domLayout' (board), 'domState' (live), 'domEvent' (banner).
+  function handleDomMessage(str) {
+    let m; try { m = JSON.parse(str); } catch { return; }
+    if (m.t === 'domLayout') {
+      domLayout = m;
+      domZoneById = new Map(m.zones.map(z => [z.id, z]));
+      domTeamById = new Map(m.teams.map(t => [t.id, t]));
+      if (!mpDom) mpDom = { state:'active', timeLeft:m.roundMs, endLeft:0, overtime:false, winner:-1, event:null, teams:[], zones:[] };
+      if (domHandshakeTimer) { clearTimeout(domHandshakeTimer); domHandshakeTimer = null; }
+    } else if (m.t === 'domState') {
+      mpDom = m;
+      domStateById = new Map(m.zones.map(z => [z.id, z]));
+      if (domHandshakeTimer) { clearTimeout(domHandshakeTimer); domHandshakeTimer = null; }
+    } else if (m.t === 'domEvent') {
+      pushDomEventBanner(m.type);
+    }
+  }
+  function pushDomEventBanner(type) {
+    const info = {
+      foodstorm:    { text:'FOOD STORM',      sub:'Food floods the entire map',      color:'#5eff9a' },
+      doublepoints: { text:'DOUBLE POINTS',   sub:'All zone output ×2',              color:'#ffd84d' },
+      relocation:   { text:'ZONE RELOCATION', sub:'Contested zones have moved!',     color:'#a78bfa' },
+      overtime:     { text:'OVERTIME',        sub:'Triple points — final push!',     color:'#fb7185' },
+    }[type] || { text:String(type).toUpperCase(), sub:'', color:'#0ff' };
+    domBanner = { ...info, life: 3.6, total: 3.6 };
+    screenShake = Math.max(screenShake, 8);
   }
 
   function parseState(buf) {
@@ -2614,8 +2725,11 @@
   }
 
   function drawBorder(cx,cy) {
-    const half=MAP_SIZE/2,sx=-half-cx+canvas.width/2,sy=-half-cy+canvas.height/2;
-    ctx.strokeStyle='rgba(255,60,60,0.5)'; ctx.lineWidth=4; ctx.strokeRect(sx,sy,MAP_SIZE,MAP_SIZE);
+    // Zone Domination plays on a wide rectangle; everything else on the square.
+    const w = (domLayout && mpDom) ? domLayout.mapW : MAP_SIZE;
+    const h = (domLayout && mpDom) ? domLayout.mapH : MAP_SIZE;
+    const sx=-w/2-cx+canvas.width/2,sy=-h/2-cy+canvas.height/2;
+    ctx.strokeStyle='rgba(255,60,60,0.5)'; ctx.lineWidth=4; ctx.strokeRect(sx,sy,w,h);
   }
 
   // ===== Battle Royale HUD: countdown / damage vignette / winner screen =====
@@ -3147,6 +3261,161 @@
     ctx.closePath();
   }
 
+  // ---- Zone Domination HUD (screen space) ----
+  function drawTeamPill(x, y, w, h, team, alignRight, leadScore) {
+    const isLeader = team.score >= leadScore && leadScore > 0;
+    ctx.fillStyle = 'rgba(8,12,28,0.82)';
+    ctx.strokeStyle = isLeader ? team.color : hexA(team.color, 0.45);
+    roundRect(ctx, x, y, w, h, 10); ctx.fill(); ctx.lineWidth = isLeader ? 2 : 1.2; ctx.stroke();
+    // progress fill proportional to score share
+    const frac = Math.max(0.04, Math.min(1, team.score / leadScore));
+    ctx.save();
+    roundRect(ctx, x, y, w, h, 10); ctx.clip();
+    const fw = w * frac;
+    ctx.fillStyle = hexA(team.color, 0.18);
+    ctx.fillRect(alignRight ? x + w - fw : x, y, fw, h);
+    ctx.restore();
+    // color swatch
+    const sw = 8;
+    ctx.fillStyle = team.color; ctx.shadowColor = team.color; ctx.shadowBlur = 8;
+    roundRect(ctx, alignRight ? x + w - sw - 4 : x + 4, y + 6, sw, h - 12, 3); ctx.fill(); ctx.shadowBlur = 0;
+    // text
+    const tx = alignRight ? x + w - 18 : x + 18;
+    ctx.textAlign = alignRight ? 'right' : 'left';
+    ctx.fillStyle = '#eef5ff';
+    ctx.font = "800 13px 'Inter',sans-serif";
+    ctx.fillText((isLeader ? '👑 ' : '') + team.name, tx, y + 13);
+    ctx.font = "800 19px 'Space Grotesk','Inter',sans-serif";
+    ctx.fillStyle = team.color;
+    ctx.fillText(String(team.score), tx, y + 30);
+    ctx.font = "600 10px 'Inter',sans-serif";
+    ctx.fillStyle = 'rgba(200,215,230,0.7)';
+    const meta = `${team.zones} zones · ⬡ ${team.res}`;
+    ctx.fillText(meta, alignRight ? tx - 64 : tx + 64, y + 30);
+  }
+  function drawDominationHUD(dt) {
+    if (!mpDom || !domLayout) return;
+    const W = canvas.width, H = canvas.height;
+    if (domBanner) { domBanner.life -= dt; if (domBanner.life <= 0) domBanner = null; }
+
+    // Merge live scores with team identity; tally zones held
+    const zoneCount = new Map();
+    for (const zs of domStateById.values()) if (zs.o >= 0) zoneCount.set(zs.o, (zoneCount.get(zs.o)||0) + 1);
+    const teams = (mpDom.teams || []).map(t => {
+      const info = domTeamById.get(t.id) || {};
+      return { id: t.id, score: t.score||0, res: t.res||0, zones: zoneCount.get(t.id)||0,
+               name: info.name || ('Team ' + t.id), color: info.color || domTeamColor(t.id) };
+    }).sort((a,b) => a.id - b.id);
+    const leadScore = Math.max(1, ...teams.map(t => t.score));
+
+    ctx.save();
+    ctx.textBaseline = 'middle';
+
+    // Round timer (center)
+    const secs = Math.max(0, Math.ceil((mpDom.timeLeft||0)/1000));
+    const timeStr = `${Math.floor(secs/60)}:${(secs%60)<10?'0':''}${secs%60}`;
+    const ot = mpDom.overtime;
+    const tpw = 86, tph = 40, tpx = W/2 - tpw/2, tpy = 12;
+    ctx.fillStyle = 'rgba(8,12,28,0.85)';
+    ctx.strokeStyle = ot ? '#fb7185' : 'rgba(120,200,255,0.5)';
+    roundRect(ctx, tpx, tpy, tpw, tph, 10); ctx.fill(); ctx.lineWidth = ot ? 2 : 1.4; ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = ot ? '#fb7185' : '#9fb3c8';
+    ctx.font = "700 8px 'Inter',sans-serif";
+    ctx.fillText(ot ? 'OVERTIME' : 'TIME', W/2, tpy + 11);
+    ctx.fillStyle = ot ? '#fb7185' : '#e8f4ff';
+    ctx.font = "800 19px 'Space Grotesk','Inter',sans-serif";
+    ctx.fillText(timeStr, W/2, tpy + 27);
+
+    // Team pills — flank the timer for 2 teams; row beneath for more
+    const pillW = 188, pillH = 44;
+    if (teams.length === 2) {
+      drawTeamPill(tpx - 12 - pillW, 10, pillW, pillH, teams[0], false, leadScore);
+      drawTeamPill(tpx + tpw + 12,   10, pillW, pillH, teams[1], true,  leadScore);
+    } else {
+      let rx = W/2 - (teams.length * (pillW + 8))/2;
+      for (const t of teams) { drawTeamPill(rx, tpy + tph + 8, pillW, pillH, t, false, leadScore); rx += pillW + 8; }
+    }
+
+    // Active event chip (under timer)
+    if (mpDom.event && mpDom.event.type) {
+      const ev = {
+        foodstorm:   ['⛆ FOOD STORM', '#5eff9a'], doublepoints: ['✦ DOUBLE POINTS', '#ffd84d'],
+        relocation:  ['⇄ RELOCATION', '#a78bfa'], overtime:     ['⚡ OVERTIME', '#fb7185'],
+      }[mpDom.event.type] || [mpDom.event.type.toUpperCase(), '#0ff'];
+      const left = Math.ceil((mpDom.event.left||0)/1000);
+      const txt = `${ev[0]}  ${left}s`;
+      ctx.font = "800 12px 'Inter',sans-serif";
+      const cw = ctx.measureText(txt).width + 26;
+      const cy0 = tpy + tph + 8;
+      ctx.fillStyle = 'rgba(8,12,28,0.85)'; ctx.strokeStyle = hexA(ev[1], 0.7);
+      roundRect(ctx, W/2 - cw/2, cy0, cw, 24, 12); ctx.fill(); ctx.lineWidth = 1.3; ctx.stroke();
+      ctx.fillStyle = ev[1]; ctx.textAlign = 'center';
+      ctx.fillText(txt, W/2, cy0 + 13);
+    }
+
+    // Player role + team economy panel (bottom-left)
+    if (selectedTeamId >= 0) {
+      const myTeam = teams.find(t => t.id === selectedTeamId);
+      const role = ROLE_NAMES[selectedRole] || 'Scout';
+      const panelW = 168, panelH = 52, px = 14, py = H - panelH - 16;
+      ctx.fillStyle = 'rgba(8,12,28,0.78)';
+      ctx.strokeStyle = myTeam ? hexA(myTeam.color, 0.5) : 'rgba(255,255,255,0.15)';
+      roundRect(ctx, px, py, panelW, panelH, 12); ctx.fill(); ctx.lineWidth = 1.2; ctx.stroke();
+      if (myTeam) { ctx.fillStyle = myTeam.color; ctx.shadowColor = myTeam.color; ctx.shadowBlur = 8; roundRect(ctx, px + 8, py + 10, 6, panelH - 20, 3); ctx.fill(); ctx.shadowBlur = 0; }
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#9fb3c8'; ctx.font = "700 9px 'Inter',sans-serif";
+      ctx.fillText('YOUR ROLE', px + 22, py + 13);
+      ctx.fillStyle = '#eef5ff'; ctx.font = "800 16px 'Space Grotesk','Inter',sans-serif";
+      ctx.fillText(role, px + 22, py + 30);
+      ctx.fillStyle = 'rgba(180,200,220,0.75)'; ctx.font = "600 10px 'Inter',sans-serif";
+      ctx.fillText(myTeam ? `${myTeam.name} · ⬡ ${myTeam.res}` : '', px + 22, py + 44);
+    }
+
+    ctx.restore();
+
+    // Big event banner (center flash)
+    if (domBanner) {
+      const t = domBanner.life / domBanner.total;
+      const a = t > 0.8 ? (1 - t) / 0.2 : t < 0.25 ? t / 0.25 : 1;
+      ctx.save();
+      ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = "800 46px 'Space Grotesk','Inter',sans-serif";
+      ctx.fillStyle = domBanner.color; ctx.shadowColor = domBanner.color; ctx.shadowBlur = 30;
+      ctx.fillText(domBanner.text, W/2, H*0.26);
+      ctx.shadowBlur = 0; ctx.font = "600 15px 'Inter',sans-serif"; ctx.fillStyle = '#e8f0ff';
+      ctx.fillText(domBanner.sub, W/2, H*0.26 + 36);
+      ctx.restore();
+    }
+
+    // Round-over / winner overlay
+    if (mpDom.state === 'ended') {
+      const win = mpDom.winner >= 0 ? (domTeamById.get(mpDom.winner) || {}) : null;
+      const wc = win ? (win.color || domTeamColor(mpDom.winner)) : '#94a3b8';
+      ctx.save();
+      ctx.fillStyle = 'rgba(6,8,26,0.78)'; ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = "800 13px 'Inter',sans-serif"; ctx.fillStyle = 'rgba(200,215,230,0.85)';
+      ctx.fillText('ROUND OVER', W/2, H/2 - 96);
+      ctx.font = "800 54px 'Space Grotesk','Inter',sans-serif";
+      ctx.fillStyle = wc; ctx.shadowColor = wc; ctx.shadowBlur = 34;
+      ctx.fillText(win ? `${win.name} DOMINATES` : 'STALEMATE', W/2, H/2 - 36);
+      ctx.shadowBlur = 0;
+      // final scores
+      ctx.font = "700 17px 'Inter',sans-serif";
+      let ry = H/2 + 24;
+      for (const t of teams.slice().sort((a,b)=>b.score-a.score)) {
+        ctx.fillStyle = t.color; ctx.textAlign = 'right'; ctx.fillText(t.name, W/2 - 14, ry);
+        ctx.fillStyle = '#eef5ff'; ctx.textAlign = 'left'; ctx.fillText(String(t.score), W/2 + 14, ry);
+        ry += 28;
+      }
+      const nextS = Math.ceil((mpDom.endLeft||0)/1000);
+      ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(180,200,220,0.75)'; ctx.font = "500 13px 'Inter',sans-serif";
+      ctx.fillText(`Next round in ${nextS}s`, W/2, ry + 14);
+      ctx.restore();
+    }
+  }
+
   function showRoyaleSealedNotice() {
     royaleSealedTimer = 4.0;
     try {
@@ -3214,6 +3483,157 @@
       ctx.stroke();
       ctx.setLineDash([]);
     }
+  }
+
+  // ---- Zone Domination world rendering (shapes only; text lives in the HUD) ----
+  function hexA(hex, a) {
+    let h = String(hex || '#888').replace('#','');
+    if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    const n = parseInt(h, 16) || 0;
+    return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+  }
+  function domTeamColor(teamId) {
+    if (teamId == null || teamId < 0) return '#9fb3c8';
+    const t = domTeamById.get(teamId);
+    return (t && t.color) || COLORS[teamId] || '#fff';
+  }
+  function domLiveZone(z) {
+    return domStateById.get(z.id) || { o: z.home, p: z.home>=0?100:0, l: z.home>=0?1:0, cap:-1, core:0, hot:0, grp:1 };
+  }
+  function drawZoneStar(sx, sy, r, color) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const ang = -Math.PI/2 + i*Math.PI/5;
+      const rad = i % 2 === 0 ? r : r*0.46;
+      const px = sx + Math.cos(ang)*rad, py = sy + Math.sin(ang)*rad;
+      i === 0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = hexA(color, 0.9); ctx.shadowColor = color; ctx.shadowBlur = 16;
+    ctx.fill(); ctx.shadowBlur = 0;
+    ctx.lineWidth = 2/zoom; ctx.strokeStyle = '#fff8e1'; ctx.stroke();
+  }
+  function drawZoneShield(sx, sy, r, color) {
+    ctx.beginPath();
+    ctx.moveTo(sx, sy - r);
+    ctx.lineTo(sx + r*0.82, sy - r*0.5);
+    ctx.lineTo(sx + r*0.82, sy + r*0.28);
+    ctx.quadraticCurveTo(sx + r*0.4, sy + r*0.95, sx, sy + r*1.05);
+    ctx.quadraticCurveTo(sx - r*0.4, sy + r*0.95, sx - r*0.82, sy + r*0.28);
+    ctx.lineTo(sx - r*0.82, sy - r*0.5);
+    ctx.closePath();
+    ctx.fillStyle = hexA(color, 0.85); ctx.shadowColor = color; ctx.shadowBlur = 12;
+    ctx.fill(); ctx.shadowBlur = 0;
+    ctx.lineWidth = 2.5/zoom; ctx.strokeStyle = '#fff'; ctx.stroke();
+  }
+  function drawZoneGem(sx, sy, r, color) {
+    ctx.beginPath();
+    ctx.moveTo(sx, sy - r);
+    ctx.lineTo(sx + r*0.72, sy);
+    ctx.lineTo(sx, sy + r);
+    ctx.lineTo(sx - r*0.72, sy);
+    ctx.closePath();
+    ctx.fillStyle = hexA(color, 0.9); ctx.shadowColor = color; ctx.shadowBlur = 14;
+    ctx.fill(); ctx.shadowBlur = 0;
+    ctx.lineWidth = 2/zoom; ctx.strokeStyle = '#eafff5'; ctx.stroke();
+  }
+  function drawLevelPips(sx, sy, level, color) {
+    const n = 5, gap = 13/zoom, pr = 4/zoom;
+    const startX = sx - (n-1)*gap/2;
+    for (let i = 0; i < n; i++) {
+      ctx.beginPath(); ctx.arc(startX + i*gap, sy, pr, 0, Math.PI*2);
+      ctx.fillStyle = i < level ? color : 'rgba(255,255,255,0.18)';
+      ctx.fill();
+    }
+  }
+  function drawDominationZones(cx, cy) {
+    if (!domLayout || !mpDom) return;
+    const midX = canvas.width/2, midY = canvas.height/2;
+    const toX = wx => wx - cx + midX, toY = wy => wy - cy + midY;
+    const marginW = canvas.width/(2*zoom) + 1400, marginH = canvas.height/(2*zoom) + 1400;
+
+    // Territory connections between adjacent friendly zones (drawn beneath zones)
+    ctx.lineCap = 'round';
+    for (const z of domLayout.zones) {
+      const zs = domLiveZone(z); if (zs.o < 0) continue;
+      for (const nId of z.adj) {
+        if (nId <= z.id) continue;
+        const n = domZoneById.get(nId); if (!n) continue;
+        const ns = domLiveZone(n); if (ns.o !== zs.o) continue;
+        const col = domTeamColor(zs.o);
+        ctx.strokeStyle = col; ctx.globalAlpha = 0.45; ctx.lineWidth = 7/zoom;
+        ctx.shadowColor = col; ctx.shadowBlur = 14;
+        ctx.beginPath(); ctx.moveTo(toX(z.x), toY(z.y)); ctx.lineTo(toX(n.x), toY(n.y)); ctx.stroke();
+      }
+    }
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+
+    for (const z of domLayout.zones) {
+      const sx = toX(z.x), sy = toY(z.y);
+      if (sx < midX-marginW || sx > midX+marginW || sy < midY-marginH || sy > midY+marginH) continue;
+      const zs = domLiveZone(z);
+      const owner = zs.o, r = z.r;
+      const ownColor = domTeamColor(owner);
+
+      // Hotspot aura
+      if (zs.hot) {
+        const pulse = 0.45 + 0.3*Math.sin(animTime*5);
+        ctx.strokeStyle = `rgba(255,216,77,${pulse})`; ctx.lineWidth = 6/zoom;
+        ctx.shadowColor = '#ffd84d'; ctx.shadowBlur = 26;
+        ctx.beginPath(); ctx.arc(sx, sy, r + 26, 0, Math.PI*2); ctx.stroke(); ctx.shadowBlur = 0;
+      }
+
+      // Territory fill
+      if (owner >= 0) {
+        const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
+        g.addColorStop(0, hexA(ownColor, 0.34)); g.addColorStop(1, hexA(ownColor, 0.05));
+        ctx.fillStyle = g;
+      } else {
+        ctx.fillStyle = 'rgba(150,170,190,0.10)';
+      }
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI*2); ctx.fill();
+
+      // Boundary ring
+      ctx.strokeStyle = owner>=0 ? ownColor : 'rgba(180,200,220,0.55)';
+      ctx.lineWidth = (owner>=0 ? 3 : 2)/zoom;
+      ctx.setLineDash(owner>=0 ? [] : [10/zoom, 8/zoom]);
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI*2); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Capture / neutralize progress arc
+      if (zs.p > 0 && zs.p < 100 && zs.cap >= 0) {
+        const capColor = domTeamColor(zs.cap);
+        ctx.strokeStyle = capColor; ctx.lineWidth = 7/zoom;
+        ctx.shadowColor = capColor; ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r - 5/zoom, -Math.PI/2, -Math.PI/2 + Math.PI*2*(zs.p/100));
+        ctx.stroke(); ctx.shadowBlur = 0;
+      }
+
+      // Type icon
+      const iconR = Math.min(r*0.42, 64);
+      if (z.type === ZONE_VIP) drawZoneStar(sx, sy, iconR, owner>=0 ? ownColor : '#ffd84d');
+      else if (z.type === ZONE_HOME) drawZoneShield(sx, sy, iconR, ownColor);
+      else if (z.type === ZONE_RESOURCE) drawZoneGem(sx, sy, iconR*0.85, owner>=0 ? ownColor : '#5eff9a');
+
+      // Core status dot (center)
+      if (z.core) {
+        const cr = 12;
+        ctx.beginPath(); ctx.arc(sx, sy, cr, 0, Math.PI*2);
+        if (zs.core === 2)      { ctx.fillStyle='rgba(40,10,10,0.85)'; ctx.fill(); ctx.strokeStyle='#fb7185'; }
+        else if (zs.core === 1) { const p=0.5+0.5*Math.sin(animTime*9); ctx.fillStyle=`rgba(255,120,80,${0.3+0.45*p})`; ctx.fill(); ctx.strokeStyle='#ffb070'; }
+        else                    { ctx.fillStyle='rgba(94,234,212,0.22)'; ctx.fill(); ctx.strokeStyle='#5eead4'; }
+        ctx.lineWidth = 2.5/zoom; ctx.stroke();
+        if (zs.core === 2) { // broken core: a red slash
+          ctx.strokeStyle='#fb7185'; ctx.lineWidth=2.5/zoom;
+          ctx.beginPath(); ctx.moveTo(sx-cr*0.7, sy-cr*0.7); ctx.lineTo(sx+cr*0.7, sy+cr*0.7); ctx.stroke();
+        }
+      }
+
+      // Level pips (owned, non-home)
+      if (owner>=0 && z.type !== ZONE_HOME && zs.l > 0) drawLevelPips(sx, sy + r - 16, zs.l, ownColor);
+    }
+    ctx.lineCap = 'butt';
   }
 
   function drawFood(cx,cy) {
@@ -3628,7 +4048,10 @@
     minimapCtx.clearRect(0,0,w,h);
     minimapCtx.fillStyle='rgba(0,10,20,0.6)';minimapCtx.fillRect(0,0,w,h);
     minimapCtx.strokeStyle='rgba(0,255,255,0.3)';minimapCtx.lineWidth=1;minimapCtx.strokeRect(0,0,w,h);
-    const scale=w/MAP_SIZE,ox=w/2,oy=h/2;
+    // Domination uses a wide rectangle — fit it (uniform scale) into the minimap.
+    const mmMapW = (domLayout && mpDom) ? domLayout.mapW : MAP_SIZE;
+    const mmMapH = (domLayout && mpDom) ? domLayout.mapH : MAP_SIZE;
+    const scale=Math.min(w/mmMapW, h/mmMapH),ox=w/2,oy=h/2;
     // Battle Royale safe zone — red danger fill + safe-zone ring + target preview
     if (localGame && localGame.mode === 'royale') {
       const zcx = (localGame.safeCenterX || 0) * scale + ox;
@@ -3660,13 +4083,40 @@
       }
       minimapCtx.setLineDash([]);
     }
+    // Zone Domination — territory control overlay
+    if (domLayout && mpDom) {
+      minimapCtx.strokeStyle = 'rgba(120,160,200,0.25)'; minimapCtx.lineWidth = 1;
+      minimapCtx.strokeRect(ox - mmMapW*scale/2, oy - mmMapH*scale/2, mmMapW*scale, mmMapH*scale);
+      for (const z of domLayout.zones) {
+        const zs = domLiveZone(z); if (zs.o < 0) continue;
+        for (const nId of z.adj) {
+          if (nId <= z.id) continue;
+          const n = domZoneById.get(nId); if (!n) continue;
+          const ns = domLiveZone(n); if (ns.o !== zs.o) continue;
+          minimapCtx.strokeStyle = hexA(domTeamColor(zs.o), 0.6); minimapCtx.lineWidth = 1.5;
+          minimapCtx.beginPath(); minimapCtx.moveTo(z.x*scale+ox, z.y*scale+oy); minimapCtx.lineTo(n.x*scale+ox, n.y*scale+oy); minimapCtx.stroke();
+        }
+      }
+      for (const z of domLayout.zones) {
+        const zs = domLiveZone(z);
+        const rr = (z.type === ZONE_HOME || z.type === ZONE_VIP) ? 5 : 3.5;
+        if (zs.hot) { minimapCtx.shadowColor = '#ffd84d'; minimapCtx.shadowBlur = 6; }
+        minimapCtx.fillStyle = zs.o >= 0 ? domTeamColor(zs.o) : 'rgba(165,185,205,0.55)';
+        minimapCtx.beginPath(); minimapCtx.arc(z.x*scale+ox, z.y*scale+oy, rr, 0, Math.PI*2); minimapCtx.fill();
+        minimapCtx.shadowBlur = 0;
+        if (z.type === ZONE_VIP) { minimapCtx.strokeStyle = '#ffd84d'; minimapCtx.lineWidth = 1.5; minimapCtx.stroke(); }
+      }
+    }
     const megaPulse=0.7+0.3*Math.sin(animTime*4);
     for(const m of megaOrbs){minimapCtx.fillStyle=COLORS[m.color];minimapCtx.globalAlpha=megaPulse;minimapCtx.beginPath();minimapCtx.arc(m.x*scale+ox,m.y*scale+oy,3,0,Math.PI*2);minimapCtx.fill();}
     minimapCtx.globalAlpha=1;
     for(const snake of snakes){
       if(!snake.alive||snake.segments.length===0) continue;
       const head=snake.segments[0];
-      minimapCtx.fillStyle=snake.id===myId?'#fff':getSegColor(snake,0);
+      // Domination: color heads by team so friend/foe reads at a glance.
+      minimapCtx.fillStyle = snake.id===myId ? '#fff'
+        : (domLayout && mpDom && snake.teamId>=0) ? domTeamColor(snake.teamId)
+        : getSegColor(snake,0);
       minimapCtx.globalAlpha=snake.id===myId?1:0.6;
       minimapCtx.beginPath();minimapCtx.arc(head.x*scale+ox,head.y*scale+oy,snake.id===myId?3:2,0,Math.PI*2);minimapCtx.fill();
     }
@@ -3844,7 +4294,7 @@
 
     ctx.save();
     ctx.translate(canvas.width/2,canvas.height/2);ctx.scale(zoom,zoom);ctx.translate(-canvas.width/2,-canvas.height/2);
-    drawStars(cx,cy); drawHexGrid(cx,cy); if(showGrid) drawGrid(cx,cy); drawBorder(cx,cy); drawRoyaleRing(cx,cy); drawFood(cx,cy); drawMegaOrbs(cx,cy);
+    drawStars(cx,cy); drawHexGrid(cx,cy); if(showGrid) drawGrid(cx,cy); drawBorder(cx,cy); drawRoyaleRing(cx,cy); drawDominationZones(cx,cy); drawFood(cx,cy); drawMegaOrbs(cx,cy);
     const me=snakes.find(s=>s.id===myId);
     for(const snake of snakes){if(snake.alive&&snake.id!==myId)drawSnake(snake,cx,cy);}
     if(me&&me.alive) drawSnake(me,cx,cy);
@@ -3882,6 +4332,7 @@
       localRoyaleStatus = null;
     }
     drawRoyaleHUD(dt, cx, cy);
+    drawDominationHUD(dt);
     // SPECTATING pill while watching after elimination
     if (spectatingBR) {
       ctx.save();

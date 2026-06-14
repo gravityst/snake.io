@@ -16,6 +16,7 @@ A slither.io-inspired multiplayer snake game with neon visuals, real-time WebSoc
 - **9 food tiers** — Tiny dots to rare glowing orbs worth 35 points
 - **12 moving mega orbs** — Drift across the map, worth 50-80 points each
 - **Royal Gauntlet mode** — A shrinking safe zone adds pressure to every run
+- **Zone Domination mode** — Teams capture and hold zones across a large rectangular map. Zones level up the longer they're held, chain into connected-territory multipliers, and feed a central VIP zone. Protected home bases, sabotage-able cores, resource economy, team roles (Scout/Defender/Collector/Commander), rotating hotspots, and live events (Food Storm, Double Points, Zone Relocation, Overtime). Pure strategy — no speed or growth boosts.
 - **Progression unlocks** — Rare skins become available by beating high scores
 - **3 AI skill tiers** — Beginner, Amateur, and Advanced bots with predictive hunting
 - **Dynamic thickness** — Snakes get visibly fatter as they grow, not just longer

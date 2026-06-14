@@ -62,6 +62,72 @@ const TEAM_COLORS = ['#0ff','#f44','#0f0','#ff0','#f0f','#f80','#08f','#8f0'];
 const TEAM_NAMES_DEFAULT = ['Cyan','Red','Green','Gold','Pink','Orange','Blue','Lime'];
 
 // =====================================================
+// ZONE DOMINATION configuration
+// =====================================================
+// A territorial team mode played on a large rectangular map. Teams capture and
+// hold a grid of zones; held zones generate points over time, level up, and
+// chain together for connection multipliers. A central VIP zone is worth the
+// most. Each team has a protected home base (spawn + HQ). Rotating hotspots and
+// periodic events (Food Storm / Double Points / Zone Relocation / Overtime)
+// keep the board moving. Roles (Scout/Defender/Collector/Commander) give
+// *territorial* edges only — never snake speed or growth boosts.
+const DOM_MAP_W = 18000;             // rectangular map width  (halfW = 9000)
+const DOM_MAP_H = 11000;             // rectangular map height (halfH = 5500) — ~same area as the 14k square
+const DOM_ROUND_MS = 6 * 60 * 1000;  // 6-minute rounds, drop-in joins stay open throughout
+const DOM_END_HOLD_MS = 12000;       // celebrate the winner before resetting
+const DOM_OVERTIME_MS = 45000;       // final stretch: forced Overtime event
+const DOM_TEAMS_DEFAULT = 2;
+const DOM_MAX_BOTS = 14;             // fill the board so territory battles feel alive
+
+const DOM_ADJ_DIST = 4200;           // two zones are "adjacent" (connectable) within this distance
+const DOM_CAPTURE_RADIUS = 920;      // standard zone footprint
+const DOM_VIP_RADIUS = 1080;
+const DOM_HOME_RADIUS = 1180;
+const DOM_RESOURCE_RADIUS = 960;
+
+const DOM_CAPTURE_RATE = 24;         // capture progress/sec at capture-weight 1 (neutral → owned)
+const DOM_NEUTRALIZE_RATE = 30;      // progress/sec lost while an enemy stands on an owned zone
+const DOM_DEFENDER_RESIST = 0.5;     // a Defender on a friendly zone halves enemy neutralize rate
+const DOM_DECAY_RATE = 10;           // contested/abandoned capture bleeds back toward 0 at this rate
+
+const DOM_MAX_LEVEL = 5;
+const DOM_LEVEL_HOLD_SEC = 15;       // seconds of uninterrupted hold per level-up
+const DOM_BASE_POINTS = 2.0;         // points/sec per level — normal zone
+const DOM_VIP_POINTS = 7.0;          // points/sec per level — VIP zone
+const DOM_HOME_POINTS = 1.4;         // points/sec — home base (fixed, does not level)
+const DOM_RESOURCE_POINTS = 1.6;     // points/sec per level — resource zone (also yields resources)
+const DOM_RESOURCE_RATE = 4.0;       // resources/sec per level from a resource zone
+const DOM_RES_CONVERT_RATE = 3.0;    // resources auto-converted to score per sec
+const DOM_RES_CONVERT_VALUE = 0.5;   // score gained per resource converted
+const DOM_COLLECTOR_YIELD = 0.5;     // fraction of eaten food value a Collector also banks as team resources
+
+const DOM_CONN_MULT = 0.16;          // +16% point output per *extra* zone in a connected friendly group
+const DOM_HOTSPOT_MULT = 3.0;        // point multiplier on an active hotspot zone
+const DOM_HOTSPOT_PERIOD_MS = 40000; // a fresh hotspot set is chosen this often
+const DOM_HOTSPOT_DURATION_MS = 26000;
+const DOM_HOTSPOT_COUNT = 2;         // zones spotlighted per rotation
+
+const DOM_EVENT_PERIOD_MS = 58000;   // global event cadence
+const DOM_EVENT_DURATION_MS = 24000;
+const DOM_FOODSTORM_BURST = 650;     // extra food dropped (uniformly) when a Food Storm hits
+
+// Core sabotage is a hit-and-run denial: disabling is a touch faster than the
+// ~3.3s it takes to neutralize a zone outright, so a raider can dart in, knock
+// the core offline (zeroing its output) and leave before they'd ever flip it.
+// Owners repair more slowly, so an unattended core stays vulnerable.
+const DOM_CORE_DISABLE_SEC = 3.0;    // enemy presence needed to knock a core offline (stops that zone's output)
+const DOM_CORE_REPAIR_SEC = 6;       // owner presence needed to bring a core back online
+
+// Zone types
+const ZONE_NORMAL = 0, ZONE_VIP = 1, ZONE_HOME = 2, ZONE_RESOURCE = 3;
+// Team roles (territorial modifiers only — no speed/growth boosts)
+const ROLE_SCOUT = 0, ROLE_DEFENDER = 1, ROLE_COLLECTOR = 2, ROLE_COMMANDER = 3;
+const ROLE_NAMES = ['Scout', 'Defender', 'Collector', 'Commander'];
+// Capture weight each role contributes while standing on a zone
+const ROLE_CAPTURE_WEIGHT = [1.0, 1.0, 1.0, 1.35]; // Commander rallies (heavier); others base
+const DOM_EVENT_TYPES = ['foodstorm', 'doublepoints', 'relocation'];
+
+// =====================================================
 // Room
 // =====================================================
 class Room {
@@ -73,6 +139,14 @@ class Room {
     this.maxTeams = opts.maxTeams || Math.floor(MAX_PLAYERS_PER_ROOM / (this.teamSize || 2));
     this.isCustom = opts.isCustom || false;
     this.creatorName = opts.creatorName || '';
+
+    // Playfield bounds. Square by default; Zone Domination uses a rectangle.
+    this.mapHalfW = MAP_SIZE / 2;
+    this.mapHalfH = MAP_SIZE / 2;
+    if (this.mode === 'domination') {
+      this.mapHalfW = DOM_MAP_W / 2;
+      this.mapHalfH = DOM_MAP_H / 2;
+    }
 
     // ---- Battle Royale state ----
     if (this.mode === 'royale') {
@@ -114,18 +188,37 @@ class Room {
     }
 
 
-    // Team state (team mode only)
-    // teams: Map<teamId, { name, color, memberIds: Set<snakeId> }>
+    // Team state (team + domination modes)
+    // teams: Map<teamId, { name, color, memberIds: Set<snakeId>, domScore, resources }>
     this.teams = new Map();
-    if (this.mode === 'team') {
-      const numTeams = Math.min(this.maxTeams, 8);
-      for (let i = 0; i < numTeams; i++) {
-        this.teams.set(i, {
-          name: TEAM_NAMES_DEFAULT[i] || `Team ${i+1}`,
-          color: TEAM_COLORS[i] || '#fff',
-          memberIds: new Set(),
-        });
-      }
+    const numTeams = this.mode === 'domination'
+      ? Math.max(2, Math.min(opts.numTeams || DOM_TEAMS_DEFAULT, 4))
+      : (this.mode === 'team' ? Math.min(this.maxTeams, 8) : 0);
+    for (let i = 0; i < numTeams; i++) {
+      this.teams.set(i, {
+        name: TEAM_NAMES_DEFAULT[i] || `Team ${i+1}`,
+        color: TEAM_COLORS[i] || '#fff',
+        memberIds: new Set(),
+        domScore: 0,    // Zone Domination cumulative team score
+        resources: 0,   // Zone Domination team economy
+      });
+    }
+
+    // ---- Zone Domination state ----
+    if (this.mode === 'domination') {
+      this.domState = 'active';        // 'active' | 'ended' (joins always open)
+      this.domRoundStart = Date.now();
+      this.domRoundEnd = this.domRoundStart + DOM_ROUND_MS;
+      this.domEndTime = 0;
+      this.domWinnerTeam = -1;
+      this.domEvent = null;            // { type, until } currently-running global event
+      this.domNextEventAt = this.domRoundStart + DOM_EVENT_PERIOD_MS;
+      this.domNextHotspotAt = this.domRoundStart + DOM_HOTSPOT_PERIOD_MS;
+      this.domOvertime = false;
+      this.domStormUntil = 0;
+      this.domLayoutVersion = 1;       // bumped on relocation so clients re-read layout
+      this.zones = [];
+      this._domBuildZones();
     }
 
     this.snakes = new Map();
@@ -160,6 +253,8 @@ class Room {
       this.broadcastLeaderboard();
       // Royale state at lower freq (every ~6 frames ≈ 5 Hz)
       if (this.mode === 'royale' && this.tickCount % 6 === 0) this.broadcastRoyaleState();
+      // Zone Domination meta-state at ~5 Hz (JSON text frame)
+      if (this.mode === 'domination' && this.tickCount % 6 === 0) this.broadcastDominationState();
     }, BROADCAST_MS);
   }
 
@@ -185,6 +280,7 @@ class Room {
       if (this.royaleState === 'active' || this.royaleState === 'ended') return 0;
       return Math.max(0, ROYALE_MAX_PLAYERS - this.realPlayerCount);
     }
+    if (this.mode === 'domination') return Math.max(0, DOM_MAX_BOTS - this.realPlayerCount);
     return Math.max(0, MAX_BOTS - this.realPlayerCount);
   }
 
@@ -206,6 +302,14 @@ class Room {
     const r = Math.pow(Math.random(), power) * (MAP_SIZE/2 - 100);
     const a = Math.random() * Math.PI * 2;
     return { x: Math.cos(a)*r, y: Math.sin(a)*r };
+  }
+  // Uniform spread across the whole rectangular field — no center bias, so no
+  // part of the map carries a resource advantage (Zone Domination requirement).
+  _uniformPos(margin = 120) {
+    return {
+      x: (Math.random() * 2 - 1) * (this.mapHalfW - margin),
+      y: (Math.random() * 2 - 1) * (this.mapHalfH - margin),
+    };
   }
   _thickness(s) { return 1 + Math.sqrt(s.score) / 45 + s.score / 8000; }
   _buildFoodGrid() {
@@ -245,7 +349,12 @@ class Room {
   }
 
   // --- Food / Orbs ---
-  spawnFood() { while (this.food.length<FOOD_COUNT) this.food.push(this._createFood()); }
+  // During a Food Storm the working target & trim cap rise so the burst of
+  // evenly-spread food actually persists instead of being trimmed away.
+  _foodStorming() { return this.mode === 'domination' && this.domStormUntil && Date.now() < this.domStormUntil; }
+  _foodTarget() { return this._foodStorming() ? FOOD_COUNT + DOM_FOODSTORM_BURST : FOOD_COUNT; }
+  _foodCap() { return this._foodStorming() ? MAX_FOOD + DOM_FOODSTORM_BURST : MAX_FOOD; }
+  spawnFood() { const t = this._foodTarget(); while (this.food.length<t) this.food.push(this._createFood()); }
   _createFood() {
     const r=Math.random(); let radius,value,tier;
     if(r<0.35){radius=3+Math.random()*2;value=1;tier=0;}
@@ -257,12 +366,12 @@ class Room {
     else if(r<0.99){radius=15+Math.random()*2;value=18;tier=6;}
     else if(r<0.997){radius=18+Math.random()*2;value=26;tier=7;}
     else{radius=21+Math.random()*3;value=35;tier=8;}
-    const pos=this._zoned(1.5);
+    const pos=this.mode==='domination'?this._uniformPos():this._zoned(1.5);
     return {x:pos.x,y:pos.y,color:Math.floor(Math.random()*8),radius,value,tier};
   }
   spawnMegaOrbs() { while(this.megaOrbs.length<MEGA_ORB_COUNT) this.megaOrbs.push(this._createMegaOrb()); }
   _createMegaOrb() {
-    const a=Math.random()*Math.PI*2,speed=25+Math.random()*25,pos=this._zoned(1.3);
+    const a=Math.random()*Math.PI*2,speed=25+Math.random()*25,pos=this.mode==='domination'?this._uniformPos(200):this._zoned(1.3);
     return {x:pos.x,y:pos.y,vx:Math.cos(a)*speed,vy:Math.sin(a)*speed,
       radius:22+Math.random()*8,value:50+Math.floor(Math.random()*31),
       color:Math.floor(Math.random()*8),spin:Math.random()*Math.PI*2};
@@ -278,6 +387,8 @@ class Room {
         const teamId = i % this.teams.size;
         snake.teamId = teamId;
         this.teams.get(teamId).memberIds.add(snake.id);
+      } else if (this.mode==='domination') {
+        this._domBotJoin(snake);
       }
       this.bots.push(snake.id);
     }
@@ -296,6 +407,7 @@ class Room {
       skill:skill??SKILL_BEGINNER,
       boostAccum:0,botTimer:0,botWanderAngle:angle,
       teamId:-1, // -1 = no team (solo mode)
+      role:-1,   // -1 = no role; Zone Domination assigns Scout/Defender/Collector/Commander
       invincible:2, // 2 seconds of spawn invincibility
       kills:0,
     };
@@ -304,8 +416,8 @@ class Room {
   }
 
   // --- Player join/leave ---
-  // Protocol: join message is [0x03][skinIdx][teamId (if team mode)][name...]
-  playerJoin(ws, name, skinIdx, teamId, accessory) {
+  // Protocol: join message is [0x03][skinIdx][accessory][teamId (team/domination)][role (domination)][name...]
+  playerJoin(ws, name, skinIdx, teamId, accessory, role = -1) {
     if (this.clients.has(ws)) return;
     if (this.realPlayerCount >= MAX_PLAYERS_PER_ROOM) return;
     // Battle Royale: refuse joins once the match has sealed
@@ -321,7 +433,7 @@ class Room {
       return;
     }
     // Remember rejoin info on the ws so we can recreate the snake on round reset
-    ws._joinInfo = { name, skinIdx, teamId, accessory };
+    ws._joinInfo = { name, skinIdx, teamId, accessory, role };
 
 
     let snake;
@@ -346,6 +458,18 @@ class Room {
           snake.teamId = teamId;
           team.memberIds.add(snake.id);
         }
+      } else if (this.mode === 'domination') {
+        // Honor the chosen team; fall back to the smallest if invalid.
+        let tid = teamId;
+        if (!this.teams.has(tid)) {
+          let minTeam = 0, minSize = Infinity;
+          for (const [id, t] of this.teams) if (t.memberIds.size < minSize) { minSize = t.memberIds.size; minTeam = id; }
+          tid = minTeam;
+        }
+        snake.teamId = tid;
+        this.teams.get(tid).memberIds.add(snake.id);
+        snake.role = (role >= 0 && role <= 3) ? role : ROLE_SCOUT;
+        this._domPlaceAtHome(snake);
       }
     }
 
@@ -364,8 +488,13 @@ class Room {
     ws.send(welcome);
 
     // Send team info: [0x06][teamCount u8][per team: id u8, colorLen u8, color, nameLen u8, name]
-    if (this.mode === 'team') {
+    if (this.mode === 'team' || this.mode === 'domination') {
       this._sendTeamInfo(ws);
+    }
+    // Zone Domination: hand the client the board layout + a current snapshot.
+    if (this.mode === 'domination') {
+      this._sendDominationLayout(ws);
+      this.broadcastDominationState();
     }
 
     this.adjustBots();
@@ -429,6 +558,8 @@ class Room {
         for (const [id,t] of this.teams) { if(t.memberIds.size<minSize){minSize=t.memberIds.size;minTeam=id;} }
         snake.teamId = minTeam;
         this.teams.get(minTeam).memberIds.add(snake.id);
+      } else if (this.mode==='domination') {
+        this._domBotJoin(snake);
       }
       this.bots.push(snake.id);
     }
@@ -442,13 +573,18 @@ class Room {
       const skinIdx = buf.length>1 ? buf[1] : 0;
       const accessory = buf.length>2 ? buf[2] : 0;
       let teamId = -1;
+      let role = -1;
       let nameStart = 3;
-      if (this.mode==='team' && buf.length>3) {
+      if ((this.mode==='team' || this.mode==='domination') && buf.length>3) {
         teamId = buf[3];
         nameStart = 4;
       }
+      if (this.mode==='domination' && buf.length>4) {
+        role = buf[4];
+        nameStart = 5;
+      }
       const name = buf.slice(nameStart).toString('utf8').substring(0,16) || 'Player';
-      this.playerJoin(ws, name, skinIdx, teamId, accessory);
+      this.playerJoin(ws, name, skinIdx, teamId, accessory, role);
       return;
     }
     const playerId=this.clients.get(ws);
@@ -525,8 +661,356 @@ class Room {
       let minTeam=0,minSize=Infinity;
       for(const [id,t] of this.teams){if(t.memberIds.size<minSize){minSize=t.memberIds.size;minTeam=id;}}
       snake.teamId=minTeam; this.teams.get(minTeam).memberIds.add(snake.id);
+    } else if(this.mode==='domination'){
+      this._domBotJoin(snake);
     }
     this.bots[idx]=snake.id;
+  }
+
+  // =====================================================
+  // ZONE DOMINATION
+  // =====================================================
+  _domBuildZones() {
+    const cols = [-0.78, -0.39, 0, 0.39, 0.78];   // fractions of halfW
+    const rows = [-0.62, 0, 0.62];                 // fractions of halfH
+    const hw = this.mapHalfW, hh = this.mapHalfH;
+    const numTeams = this.teams.size;
+    // Home placements: left-center & right-center for the first two teams;
+    // top-center & bottom-center fill in for 3- and 4-team boards.
+    const homeSpec = [[0,1,0]];
+    if (numTeams >= 2) homeSpec.push([4,1,1]);
+    if (numTeams >= 3) homeSpec.push([2,0,2]);
+    if (numTeams >= 4) homeSpec.push([2,2,3]);
+    const homeAt = (c,r) => homeSpec.find(h => h[0]===c && h[1]===r);
+
+    const zones = [];
+    let id = 0;
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < cols.length; c++) {
+        const x = Math.round(cols[c] * hw);
+        const y = Math.round(rows[r] * hh);
+        const home = homeAt(c, r);
+        const isCenter = (c === 2 && r === 1);
+        let type = ZONE_NORMAL, radius = DOM_CAPTURE_RADIUS, homeTeam = -1, hasCore = false;
+        if (home) {
+          type = ZONE_HOME; homeTeam = home[2]; radius = DOM_HOME_RADIUS;
+        } else if (isCenter) {
+          type = ZONE_VIP; radius = DOM_VIP_RADIUS; hasCore = true;
+        } else if ((c === 1 && r === 0) || (c === 3 && r === 2)) {
+          type = ZONE_RESOURCE; radius = DOM_RESOURCE_RADIUS; hasCore = true;
+        }
+        zones.push({
+          id: id++, x, y, type, radius, homeTeam, hasCore,
+          owner: homeTeam,                       // homes start owned; rest neutral
+          capturingTeam: -1,
+          progress: homeTeam >= 0 ? 100 : 0,
+          level: homeTeam >= 0 ? 1 : 0,
+          holdTime: 0,
+          coreOffline: false,
+          coreSab: 0,                            // 0..1 enemy sabotage progress
+          hotspotUntil: 0,
+          adj: [],
+        });
+      }
+    }
+    this.zones = zones;
+    this._domComputeAdjacency();
+  }
+
+  // Adjacency is derived from positions (robust to Zone Relocation): two zones
+  // connect when their centers fall within DOM_ADJ_DIST.
+  _domComputeAdjacency() {
+    for (const z of this.zones) z.adj = [];
+    for (let i = 0; i < this.zones.length; i++) {
+      for (let j = i + 1; j < this.zones.length; j++) {
+        const a = this.zones[i], b = this.zones[j];
+        const dx = a.x - b.x, dy = a.y - b.y;
+        if (dx*dx + dy*dy <= DOM_ADJ_DIST*DOM_ADJ_DIST) { a.adj.push(b.id); b.adj.push(a.id); }
+      }
+    }
+  }
+
+  // Spawn / respawn a domination snake at (or just inside) its team's home base.
+  _domPlaceAtHome(snake) {
+    const home = this.zones.find(z => z.type === ZONE_HOME && z.homeTeam === snake.teamId);
+    let cx, cy;
+    if (home) {
+      const a = Math.random()*Math.PI*2, r = Math.random()*home.radius*0.55;
+      cx = home.x + Math.cos(a)*r; cy = home.y + Math.sin(a)*r;
+    } else { const p = this._uniformPos(500); cx = p.x; cy = p.y; }
+    const angle = Math.atan2(-cy, -cx); // face toward the middle of the map
+    snake.angle = snake.targetAngle = angle;
+    snake.segments = [];
+    for (let i = 0; i < INITIAL_LENGTH; i++)
+      snake.segments.push({ x: cx - Math.cos(angle)*i*SEGMENT_SPACING, y: cy - Math.sin(angle)*i*SEGMENT_SPACING });
+  }
+
+  // Assign a domination bot to the smallest team, give it a random role, and
+  // drop it at that team's home base.
+  _domBotJoin(snake) {
+    let minTeam = 0, minSize = Infinity;
+    for (const [id, t] of this.teams) if (t.memberIds.size < minSize) { minSize = t.memberIds.size; minTeam = id; }
+    snake.teamId = minTeam;
+    this.teams.get(minTeam).memberIds.add(snake.id);
+    snake.role = Math.floor(Math.random()*4);
+    this._domPlaceAtHome(snake);
+  }
+
+  // Is this snake standing inside its own (protected) home base?
+  _domInOwnHome(snake) {
+    if (!snake || snake.teamId < 0 || snake.segments.length === 0) return false;
+    const home = this.zones.find(z => z.type === ZONE_HOME && z.homeTeam === snake.teamId);
+    if (!home) return false;
+    const h = snake.segments[0], dx = h.x - home.x, dy = h.y - home.y;
+    return dx*dx + dy*dy < home.radius*home.radius;
+  }
+
+  // Union-find over same-owner adjacency → Map<zoneId, size of its connected group>.
+  _domConnectionGroups() {
+    const parent = new Map();
+    for (const z of this.zones) parent.set(z.id, z.id);
+    const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+    for (const z of this.zones) {
+      if (z.owner < 0) continue;
+      for (const nId of z.adj) {
+        const n = this.zones[nId];
+        if (n && n.owner === z.owner) { const ra = find(z.id), rb = find(nId); if (ra !== rb) parent.set(ra, rb); }
+      }
+    }
+    const size = new Map();
+    for (const z of this.zones) { if (z.owner < 0) continue; const r = find(z.id); size.set(r, (size.get(r)||0) + 1); }
+    const out = new Map();
+    for (const z of this.zones) { if (z.owner < 0) continue; out.set(z.id, size.get(find(z.id)) || 1); }
+    return out;
+  }
+
+  _domRotateHotspots(now) {
+    for (const z of this.zones) z.hotspotUntil = 0;
+    const pool = this.zones.filter(z => z.type !== ZONE_HOME);
+    const until = now + DOM_HOTSPOT_DURATION_MS;
+    for (let i = 0; i < DOM_HOTSPOT_COUNT && pool.length; i++) {
+      const idx = Math.floor(Math.random()*pool.length);
+      pool.splice(idx, 1)[0].hotspotUntil = until;
+    }
+    this.broadcastDominationState();
+  }
+
+  _domStartEvent(type, now) {
+    this.domEvent = { type, until: now + DOM_EVENT_DURATION_MS };
+    if (type === 'foodstorm') {
+      this.domStormUntil = now + DOM_EVENT_DURATION_MS;
+      const cap = MAX_FOOD + DOM_FOODSTORM_BURST;
+      for (let i = 0; i < DOM_FOODSTORM_BURST && this.food.length < cap; i++) this.food.push(this._createFood());
+    } else if (type === 'relocation') {
+      this._domRelocateZones();
+    }
+    this.broadcastDominationEvent(type);
+  }
+
+  _domRelocateZones() {
+    // Shuffle the contestable board: move every non-home, non-VIP zone to a
+    // fresh uniform spot and reset it to neutral. Homes & the VIP hold position.
+    for (const z of this.zones) {
+      if (z.type === ZONE_HOME || z.type === ZONE_VIP) continue;
+      const p = this._uniformPos(1300);
+      z.x = Math.round(p.x); z.y = Math.round(p.y);
+      z.owner = -1; z.progress = 0; z.level = 0; z.holdTime = 0; z.capturingTeam = -1;
+      z.coreOffline = false; z.coreSab = 0; z.hotspotUntil = 0;
+    }
+    this._domComputeAdjacency();
+    this.domLayoutVersion++;
+    this.broadcastDominationLayout();
+  }
+
+  _domResetRound(now) {
+    for (const [, t] of this.teams) { t.domScore = 0; t.resources = 0; }
+    this.domState = 'active';
+    this.domRoundStart = now; this.domRoundEnd = now + DOM_ROUND_MS;
+    this.domEndTime = 0; this.domWinnerTeam = -1;
+    this.domEvent = null; this.domOvertime = false; this.domStormUntil = 0;
+    this.domNextEventAt = now + DOM_EVENT_PERIOD_MS;
+    this.domNextHotspotAt = now + DOM_HOTSPOT_PERIOD_MS;
+    this._domBuildZones();
+    this.domLayoutVersion++;
+    this.broadcastDominationLayout();
+    this.broadcastDominationState();
+    console.log(`[${this.name}] Zone Domination round reset`);
+  }
+
+  _domTick(now, dt) {
+    if (this.mode !== 'domination') return;
+
+    // ---- Round lifecycle ----
+    if (this.domState === 'ended') {
+      if (now - this.domEndTime > DOM_END_HOLD_MS) this._domResetRound(now);
+      return;
+    }
+    if (!this.domOvertime && now >= this.domRoundEnd - DOM_OVERTIME_MS) {
+      this.domOvertime = true;
+      this.domEvent = { type: 'overtime', until: this.domRoundEnd };
+      this.broadcastDominationEvent('overtime');
+    }
+    if (now >= this.domRoundEnd) {
+      let best = -Infinity, bestTeam = -1;
+      for (const [tid, t] of this.teams) if (t.domScore > best) { best = t.domScore; bestTeam = tid; }
+      this.domWinnerTeam = bestTeam;
+      this.domState = 'ended';
+      this.domEndTime = now;
+      this.domEvent = null;
+      this.broadcastDominationState();
+      return;
+    }
+
+    // ---- Hotspot rotation & global events ----
+    if (now >= this.domNextHotspotAt) { this._domRotateHotspots(now); this.domNextHotspotAt = now + DOM_HOTSPOT_PERIOD_MS; }
+    if (this.domEvent && this.domEvent.type !== 'overtime' && now >= this.domEvent.until) this.domEvent = null;
+    if (!this.domOvertime && !this.domEvent && now >= this.domNextEventAt) {
+      this._domStartEvent(DOM_EVENT_TYPES[Math.floor(Math.random()*DOM_EVENT_TYPES.length)], now);
+      this.domNextEventAt = now + DOM_EVENT_PERIOD_MS;
+    }
+
+    const pointMult = this.domOvertime ? 3 : (this.domEvent && this.domEvent.type === 'doublepoints' ? 2 : 1);
+    const captureMult = this.domOvertime ? 1.5 : 1;
+    const groupSize = this._domConnectionGroups();
+
+    for (const z of this.zones) {
+      // --- Tally team capture weights from alive heads inside the zone ---
+      const weight = new Map();
+      const defenders = new Set();
+      let ownerPresent = false, enemyPresent = false;
+      const r2 = z.radius*z.radius;
+      for (const [, s] of this.snakes) {
+        if (!s.alive || s.teamId < 0 || s.segments.length === 0) continue;
+        const h = s.segments[0], dx = h.x - z.x, dy = h.y - z.y;
+        if (dx*dx + dy*dy > r2) continue;
+        weight.set(s.teamId, (weight.get(s.teamId)||0) + (ROLE_CAPTURE_WEIGHT[s.role] ?? 1.0));
+        if (s.role === ROLE_DEFENDER) defenders.add(s.teamId);
+        if (z.owner >= 0) { if (s.teamId === z.owner) ownerPresent = true; else enemyPresent = true; }
+      }
+
+      // --- Cores: enemies disable, owners repair ---
+      if (z.hasCore && z.owner >= 0) {
+        if (enemyPresent && !ownerPresent) {
+          z.coreSab = Math.min(1, z.coreSab + dt / DOM_CORE_DISABLE_SEC);
+          if (z.coreSab >= 1) z.coreOffline = true;
+        } else if (ownerPresent && !enemyPresent && z.coreSab > 0) {
+          z.coreSab = Math.max(0, z.coreSab - dt / DOM_CORE_REPAIR_SEC);
+          if (z.coreSab <= 0) z.coreOffline = false;
+        }
+      }
+
+      if (z.type === ZONE_HOME) {
+        z.owner = z.homeTeam; z.progress = 100; z.level = Math.max(1, z.level);
+      } else {
+        // Dominant present team (near-ties count as contested)
+        let topTeam = -1, topW = 0, second = 0, present = 0;
+        for (const [tid, w] of weight) { present++; if (w > topW) { second = topW; topW = w; topTeam = tid; } else if (w > second) second = w; }
+        const contested = present > 1 && (topW - second) < 0.5;
+
+        if (topTeam < 0) {
+          if (z.owner < 0) { z.progress = Math.max(0, z.progress - DOM_DECAY_RATE*dt); if (z.progress <= 0) z.capturingTeam = -1; }
+          else {
+            // Owned & unattended — keeps holding and levels up passively over time.
+            z.holdTime += dt;
+            const tgt = Math.min(DOM_MAX_LEVEL, 1 + Math.floor(z.holdTime / DOM_LEVEL_HOLD_SEC));
+            if (tgt > z.level) z.level = tgt;
+          }
+        } else if (contested) {
+          if (z.owner < 0) z.progress = Math.max(0, z.progress - DOM_DECAY_RATE*0.5*dt);
+        } else if (z.owner === topTeam) {
+          z.progress = 100; z.capturingTeam = -1; z.holdTime += dt;
+          const tgt = Math.min(DOM_MAX_LEVEL, 1 + Math.floor(z.holdTime / DOM_LEVEL_HOLD_SEC));
+          if (tgt > z.level) z.level = tgt;
+        } else if (z.owner < 0) {
+          z.capturingTeam = topTeam;
+          z.progress += DOM_CAPTURE_RATE * topW * captureMult * dt;
+          if (z.progress >= 100) { z.owner = topTeam; z.progress = 100; z.level = 1; z.holdTime = 0; z.coreOffline = false; z.coreSab = 0; }
+        } else if (!z.hasCore || z.coreOffline) {
+          // Enemy-owned and capturable: neutralize toward 0, then it flips neutral.
+          const rate = DOM_NEUTRALIZE_RATE * topW * captureMult * (defenders.has(z.owner) ? DOM_DEFENDER_RESIST : 1);
+          z.progress -= rate * dt;
+          z.capturingTeam = topTeam;
+          if (z.progress <= 0) { z.owner = -1; z.progress = 0; z.level = 0; z.holdTime = 0; z.coreOffline = false; z.coreSab = 0; }
+        } else {
+          // Fortified: an intact core shields the zone — no capture progress until
+          // the core is sabotaged offline (handled in the core block above).
+          z.capturingTeam = topTeam;
+        }
+      }
+
+      // --- Point + resource generation ---
+      if (z.owner >= 0 && !z.coreOffline) {
+        const team = this.teams.get(z.owner);
+        if (team) {
+          const connMult = 1 + DOM_CONN_MULT * ((groupSize.get(z.id) || 1) - 1);
+          const hot = now < z.hotspotUntil ? DOM_HOTSPOT_MULT : 1;
+          const lvl = z.type === ZONE_HOME ? 1 : Math.max(1, z.level);
+          const base = z.type === ZONE_VIP ? DOM_VIP_POINTS
+                     : z.type === ZONE_HOME ? DOM_HOME_POINTS
+                     : z.type === ZONE_RESOURCE ? DOM_RESOURCE_POINTS : DOM_BASE_POINTS;
+          team.domScore += base * lvl * connMult * hot * pointMult * dt;
+          if (z.type === ZONE_RESOURCE) team.resources += DOM_RESOURCE_RATE * lvl * dt;
+        }
+      }
+    }
+
+    // ---- Team economy: resources trickle into score ----
+    for (const [, t] of this.teams) {
+      if (t.resources > 0) {
+        const conv = Math.min(t.resources, DOM_RES_CONVERT_RATE * dt);
+        t.resources -= conv;
+        t.domScore += conv * DOM_RES_CONVERT_VALUE * pointMult;
+      }
+    }
+  }
+
+  // ---- Domination broadcasts (JSON text frames — rich, low-frequency state) ----
+  _domLayoutPayload() {
+    return {
+      t: 'domLayout',
+      v: this.domLayoutVersion,
+      mapW: this.mapHalfW * 2, mapH: this.mapHalfH * 2,
+      roundMs: DOM_ROUND_MS,
+      teams: [...this.teams.entries()].map(([id, t]) => ({ id, name: t.name, color: t.color })),
+      zones: this.zones.map(z => ({ id: z.id, x: z.x, y: z.y, r: z.radius, type: z.type, home: z.homeTeam, core: z.hasCore ? 1 : 0, adj: z.adj })),
+    };
+  }
+  _sendDominationLayout(ws) {
+    if (this.mode !== 'domination' || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(this._domLayoutPayload()));
+  }
+  broadcastDominationLayout() {
+    if (this.mode !== 'domination') return;
+    const s = JSON.stringify(this._domLayoutPayload());
+    for (const [ws] of this.clients) if (ws.readyState === WebSocket.OPEN) ws.send(s);
+  }
+  broadcastDominationState() {
+    if (this.mode !== 'domination') return;
+    const now = Date.now();
+    const grp = this._domConnectionGroups();
+    const payload = {
+      t: 'domState',
+      state: this.domState,
+      timeLeft: Math.max(0, this.domRoundEnd - now),
+      endLeft: this.domState === 'ended' ? Math.max(0, this.domEndTime + DOM_END_HOLD_MS - now) : 0,
+      overtime: this.domOvertime,
+      winner: this.domWinnerTeam,
+      event: this.domEvent ? { type: this.domEvent.type, left: Math.max(0, this.domEvent.until - now) } : null,
+      teams: [...this.teams.entries()].map(([id, t]) => ({ id, score: Math.round(t.domScore), res: Math.round(t.resources) })),
+      zones: this.zones.map(z => ({
+        id: z.id, o: z.owner, p: Math.round(z.progress), l: z.level, cap: z.capturingTeam,
+        core: z.hasCore ? (z.coreOffline ? 2 : (z.coreSab > 0.05 ? 1 : 0)) : 0,
+        hot: now < z.hotspotUntil ? 1 : 0,
+        grp: grp.get(z.id) || (z.owner >= 0 ? 1 : 0),
+      })),
+    };
+    const s = JSON.stringify(payload);
+    for (const [ws] of this.clients) if (ws.readyState === WebSocket.OPEN) ws.send(s);
+  }
+  broadcastDominationEvent(type) {
+    if (this.mode !== 'domination') return;
+    const s = JSON.stringify({ t: 'domEvent', type, dur: type === 'overtime' ? DOM_OVERTIME_MS : DOM_EVENT_DURATION_MS });
+    for (const [ws] of this.clients) if (ws.readyState === WebSocket.OPEN) ws.send(s);
   }
 
   // --- BATTLE ROYALE lifecycle ---
@@ -710,6 +1194,7 @@ class Room {
     this.lastTick=now;
     this.tickCount++;
     this._royaleTick(now, dt);
+    this._domTick(now, dt);
     // Clean up disconnected snakes after 10 seconds
     for (const [name, snakeId] of this.disconnected) {
       const s = this.snakes.get(snakeId);
@@ -726,8 +1211,9 @@ class Room {
     for(const [,s] of this.snakes){if(s.alive) this._updateSnake(s,dt);}
     this._checkCollisions();
     this.spawnFood(); this.spawnMegaOrbs();
-    // Trim excess food from kill drops
-    while(this.food.length>MAX_FOOD) this.food.shift();
+    // Trim excess food from kill drops (cap lifts during a Food Storm)
+    const foodCap=this._foodCap();
+    while(this.food.length>foodCap) this.food.shift();
   }
 
   _updateSnake(snake,dt) {
@@ -739,8 +1225,8 @@ class Room {
     const speed=snake.boosting?BOOST_SPEED:SNAKE_SPEED;
     const head=snake.segments[0];
     head.x+=Math.cos(snake.angle)*speed*dt;head.y+=Math.sin(snake.angle)*speed*dt;
-    const half=MAP_SIZE/2;
-    if(head.x<-half||head.x>half||head.y<-half||head.y>half){this.killSnake(snake.id,null);return;}
+    const halfW=this.mapHalfW,halfH=this.mapHalfH;
+    if(head.x<-halfW||head.x>halfW||head.y<-halfH||head.y>halfH){this.killSnake(snake.id,null);return;}
     while(snake.segments.length>=2){
       const dx=head.x-snake.segments[1].x,dy=head.y-snake.segments[1].y;
       if(dx*dx+dy*dy<SEGMENT_SPACING**2)break;
@@ -758,7 +1244,7 @@ class Room {
     }
     const headR=HEAD_RADIUS*this._thickness(snake),eatR=headR+30;
     const gx=Math.floor(head.x/500),gy=Math.floor(head.y/500);
-    const eaten=[];
+    const eaten=[];let gained=0;
     for(let dx=-1;dx<=1;dx++){for(let dy=-1;dy<=1;dy++){
       const bucket=this.foodGrid.get((gx+dx)+','+(gy+dy));
       if(!bucket)continue;
@@ -766,22 +1252,28 @@ class Room {
         const f=this.food[idx];if(!f)continue;
         const fx=f.x-head.x;if(fx>eatR||fx<-eatR)continue;
         const fy=f.y-head.y;if(fy>eatR||fy<-eatR)continue;
-        if(fx*fx+fy*fy<(headR+f.radius)**2){eaten.push(idx);snake.score+=f.value||1;}
+        if(fx*fx+fy*fy<(headR+f.radius)**2){eaten.push(idx);const v=f.value||1;snake.score+=v;gained+=v;}
       }
     }}
     if(eaten.length){eaten.sort((a,b)=>b-a);for(const idx of eaten)this.food.splice(idx,1);}
     for(let i=this.megaOrbs.length-1;i>=0;i--){
       const m=this.megaOrbs[i],dx=head.x-m.x,dy=head.y-m.y;
-      if(dx*dx+dy*dy<(headR+m.radius)**2){this.megaOrbs.splice(i,1);snake.score+=m.value;}
+      if(dx*dx+dy*dy<(headR+m.radius)**2){this.megaOrbs.splice(i,1);snake.score+=m.value;gained+=m.value;}
+    }
+    // Zone Domination — a Collector banks part of what it eats into the team
+    // economy. Pure economy; the snake's own score/growth is unchanged.
+    if(gained>0&&this.mode==='domination'&&snake.role===ROLE_COLLECTOR&&snake.teamId>=0){
+      const team=this.teams.get(snake.teamId);
+      if(team) team.resources+=gained*DOM_COLLECTOR_YIELD;
     }
   }
 
   updateMegaOrbs(dt) {
-    const half=MAP_SIZE/2-50;
+    const halfW=this.mapHalfW-50,halfH=this.mapHalfH-50;
     for(const m of this.megaOrbs){
       m.x+=m.vx*dt;m.y+=m.vy*dt;m.spin+=dt*1.5;
-      if(m.x<-half){m.x=-half;m.vx=Math.abs(m.vx);}if(m.x>half){m.x=half;m.vx=-Math.abs(m.vx);}
-      if(m.y<-half){m.y=-half;m.vy=Math.abs(m.vy);}if(m.y>half){m.y=half;m.vy=-Math.abs(m.vy);}
+      if(m.x<-halfW){m.x=-halfW;m.vx=Math.abs(m.vx);}if(m.x>halfW){m.x=halfW;m.vx=-Math.abs(m.vx);}
+      if(m.y<-halfH){m.y=-halfH;m.vy=Math.abs(m.vy);}if(m.y>halfH){m.y=halfH;m.vy=-Math.abs(m.vy);}
     }
   }
 
@@ -790,12 +1282,14 @@ class Room {
     for(let i=0;i<arr.length;i++){
       const a=arr[i];if(!a.alive)continue;
       if(a.invincible>0) continue; // spawn invincibility
+      // Protected home base — a snake inside its own home can't be killed.
+      if(this.mode==='domination'&&this._domInOwnHome(a)) continue;
       const ahead=a.segments[0],aHeadR=HEAD_RADIUS*this._thickness(a)*0.75;
       for(let j=0;j<arr.length;j++){
         if(i===j)continue;
         const b=arr[j];if(!b.alive)continue;
         if(b.invincible>0) continue;
-        if(this.mode==='team'&&a.teamId>=0&&a.teamId===b.teamId) continue;
+        if((this.mode==='team'||this.mode==='domination')&&a.teamId>=0&&a.teamId===b.teamId) continue;
         const bDotR=DOT_RADIUS*this._thickness(b)*0.75;
         const dist=aHeadR+bDotR,distSq=dist*dist;
         for(let k=1;k<b.segments.length;k++){
@@ -878,8 +1372,8 @@ class Room {
         }
       }
     }
-    const wall = MAP_SIZE / 2 - 80;
-    if (Math.abs(px) > wall || Math.abs(py) > wall) blocked = true;
+    const wallW = this.mapHalfW - 80, wallH = this.mapHalfH - 80;
+    if (Math.abs(px) > wallW || Math.abs(py) > wallH) blocked = true;
     const inBR = this.mode === 'royale' && this.royaleState === 'active';
     if (inBR) {
       const ddx = px - this.zone.cx, ddy = py - this.zone.cy;
@@ -906,7 +1400,7 @@ class Room {
           if (d2 < minD2) minD2 = d2;
         }
       }
-      if (Math.abs(tpx) > wall || Math.abs(tpy) > wall) minD2 = Math.min(minD2, 100);
+      if (Math.abs(tpx) > wallW || Math.abs(tpy) > wallH) minD2 = Math.min(minD2, 100);
       if (inBR) {
         const ddx = tpx - this.zone.cx, ddy = tpy - this.zone.cy;
         if (ddx*ddx + ddy*ddy > (this.zone.radius - 40) ** 2) minD2 = Math.min(minD2, 100);
@@ -996,6 +1490,47 @@ class Room {
     return best;
   }
 
+  // Zone Domination bot objective: head toward the most valuable contestable
+  // zone for the team (neutral > enemy > repair own dark core > light patrol).
+  // Called as the non-threat behavior so bots actually fight over territory;
+  // they eat the (uniform) food they cross on the way. Returns true if it set a heading.
+  _domSteerToObjective(s) {
+    if (this.mode !== 'domination' || s.teamId < 0 || !this.zones || s.segments.length === 0) return false;
+    const h = s.segments[0];
+    let best = null, bestScore = -Infinity;
+    for (const z of this.zones) {
+      if (z.type === ZONE_HOME && z.homeTeam !== s.teamId) continue; // enemy home is protected — ignore
+      const dx = z.x - h.x, dy = z.y - h.y;
+      const d = Math.sqrt(dx*dx + dy*dy) + 1;
+      const val = z.type === ZONE_VIP ? 3 : z.type === ZONE_RESOURCE ? 2 : z.type === ZONE_HOME ? 0.4 : 1;
+      let want;
+      if (z.owner < 0) want = 1.5 * val;                                   // neutral — claim it
+      else if (z.owner !== s.teamId) want = 1.15 * val;                    // enemy-held — contest it
+      else if (z.coreOffline) want = 1.7 * val;                            // our zone is dark — go repair
+      else want = 0.18 * val;                                             // ours & healthy — light patrol
+      // per-bot jitter so the whole team doesn't dogpile one zone
+      const jitter = 0.8 + 0.4 * (((s.id * 2654435761) >>> 8) % 1000) / 1000;
+      const score = want * jitter * 3200 / d;
+      if (score > bestScore) { bestScore = score; best = z; }
+    }
+    if (!best) return false;
+    const bdx = best.x - h.x, bdy = best.y - h.y;
+    const bd = Math.sqrt(bdx*bdx + bdy*bdy);
+    if (bd < best.r * 0.85) {
+      // Already on the zone — loiter: chase a point that slowly orbits the centre
+      // so the bot keeps occupying it (and finishes the capture) instead of
+      // flying straight through and out the far side.
+      const ang = this.tickCount * 0.045 + s.id;
+      const px = best.x + Math.cos(ang) * best.r * 0.45;
+      const py = best.y + Math.sin(ang) * best.r * 0.45;
+      s.targetAngle = Math.atan2(py - h.y, px - h.x);
+    } else {
+      s.targetAngle = Math.atan2(bdy, bdx);
+    }
+    s.boosting = false;
+    return true;
+  }
+
   // EASY tier — wanders gently, picks nearest food, lookahead avoids most bodies.
   _easyAI(s, dt) {
     s.botTimer -= dt;
@@ -1003,8 +1538,8 @@ class Room {
     s.botTimer = 0.15 + Math.random() * 0.12;
     if (this._fleeZoneIfNeeded(s)) return;
     const h = s.segments[0];
-    const wall = MAP_SIZE / 2 - 250;
-    if (Math.abs(h.x) > wall || Math.abs(h.y) > wall) {
+    const wallW = this.mapHalfW - 250, wallH = this.mapHalfH - 250;
+    if (Math.abs(h.x) > wallW || Math.abs(h.y) > wallH) {
       s.targetAngle = Math.atan2(-h.y, -h.x);
       s.boosting = false;
       return;
@@ -1013,6 +1548,7 @@ class Room {
       s.boosting = false;
       return;
     }
+    if (this.mode === 'domination' && this._domSteerToObjective(s)) return;
     const f = this._closestFood(s, 700);
     if (f) {
       s.targetAngle = Math.atan2(f.y - h.y, f.x - h.x);
@@ -1030,8 +1566,8 @@ class Room {
     s.botTimer = 0.09 + Math.random() * 0.06;
     if (this._fleeZoneIfNeeded(s)) return;
     const h = s.segments[0];
-    const wall = MAP_SIZE / 2 - 250;
-    if (Math.abs(h.x) > wall || Math.abs(h.y) > wall) {
+    const wallW = this.mapHalfW - 250, wallH = this.mapHalfH - 250;
+    if (Math.abs(h.x) > wallW || Math.abs(h.y) > wallH) {
       s.targetAngle = Math.atan2(-h.y, -h.x);
       s.boosting = false;
       return;
@@ -1065,6 +1601,7 @@ class Room {
       s.boosting = bmd > 350 && bmd < 1100 && s.score > 20;
       return;
     }
+    if (this.mode === 'domination' && this._domSteerToObjective(s)) return;
     const f = this._bestFoodByValue(s, 900);
     if (f && !this._crowdedAt(f.x, f.y, 250, 3)) {
       s.targetAngle = Math.atan2(f.y - h.y, f.x - h.x);
@@ -1083,8 +1620,8 @@ class Room {
     s.botTimer = 0.05;
     if (this._fleeZoneIfNeeded(s)) return;
     const h = s.segments[0];
-    const wall = MAP_SIZE / 2 - 250;
-    if (Math.abs(h.x) > wall || Math.abs(h.y) > wall) {
+    const wallW = this.mapHalfW - 250, wallH = this.mapHalfH - 250;
+    if (Math.abs(h.x) > wallW || Math.abs(h.y) > wallH) {
       s.targetAngle = Math.atan2(-h.y, -h.x);
       s.boosting = false;
       return;
@@ -1134,6 +1671,7 @@ class Room {
       s.boosting = bpd > 180 && bpd < 450 && s.score > 30;
       return;
     }
+    if (this.mode === 'domination' && this._domSteerToObjective(s)) return;
     const bf = this._bestFoodByValue(s, 1300);
     if (bf && !this._crowdedAt(bf.x, bf.y, 280, 3)) {
       s.targetAngle = Math.atan2(bf.y - h.y, bf.x - h.x);
@@ -1153,7 +1691,9 @@ class Room {
       if(!mySnake||!mySnake.alive)continue;
       const cx=mySnake.segments[0].x,cy=mySnake.segments[0].y;
       // Larger view range (scales with zoom-out for big snakes)
-      const viewRange=1800+Math.min(Math.sqrt(mySnake.score)*8,800);
+      let viewRange=1800+Math.min(Math.sqrt(mySnake.score)*8,800);
+      // Scout role sees further — pure intel, no movement/growth boost.
+      if(this.mode==='domination'&&mySnake.role===ROLE_SCOUT) viewRange+=750;
       const visSnakes=[],visFood=[],visMega=[];
       for(const [,snake] of this.snakes){
         if(!snake.alive)continue;
@@ -1193,7 +1733,16 @@ class Room {
 
   broadcastLeaderboard() {
     let entries;
-    if (this.mode === 'team') {
+    if (this.mode === 'domination') {
+      // Domination leaderboard: each team's accumulated zone-control score
+      entries = [];
+      for (const [teamId, team] of this.teams) {
+        let kills = 0;
+        for (const sid of team.memberIds) { const s = this.snakes.get(sid); if (s && s.alive) kills += s.kills; }
+        entries.push({ id: 60000 + teamId, score: Math.round(team.domScore), name: team.name, isBot: false, teamId, kills });
+      }
+      entries.sort((a,b) => b.score - a.score);
+    } else if (this.mode === 'team') {
       // Team leaderboard: combined score per team
       entries = [];
       for (const [teamId, team] of this.teams) {
@@ -1251,6 +1800,7 @@ class RoomManager {
     this.createRoom('room-1', 'Neon Arena', { mode: 'solo' });
     this.createRoom('room-2', 'Team Battle', { mode: 'team', teamSize: 2, maxTeams: 8 });
     this.createRoom('room-3', 'Battle Royale', { mode: 'royale' });
+    this.createRoom('room-4', 'Zone Domination', { mode: 'domination', numTeams: 2 });
 
     // noServer mode: upgrade routing is handled in index.js so multiple
     // games (snake, click-battle) can share one Render service.
@@ -1268,13 +1818,14 @@ class RoomManager {
     return room;
   }
 
-  createCustomRoom(name, mode, teamSize, creatorName, royaleConfig) {
-    if (!['solo', 'team', 'royale'].includes(mode)) mode = 'solo';
+  createCustomRoom(name, mode, teamSize, creatorName, royaleConfig, numTeams) {
+    if (!['solo', 'team', 'royale', 'domination'].includes(mode)) mode = 'solo';
     const id = `custom-${this.nextCustomId++}`;
     const opts = {
       mode,
       teamSize: teamSize || 2,
       maxTeams: Math.floor(30/(teamSize||2)),
+      numTeams: Math.max(2, Math.min(numTeams || DOM_TEAMS_DEFAULT, 4)),
       isCustom: true,
       creatorName,
       royaleConfig: royaleConfig || null,
@@ -1316,10 +1867,11 @@ class RoomManager {
         royaleState: room.mode === 'royale' ? room.royaleState : null,
         royaleCountdownMs: room.mode === 'royale' && room.royaleState === 'countdown'
           ? Math.max(0, room.royaleJoinDeadline - Date.now()) : null,
-        teams: room.mode==='team' ? Array.from(room.teams.entries()).map(([tid,t])=>({
+        teams: (room.mode==='team'||room.mode==='domination') ? Array.from(room.teams.entries()).map(([tid,t])=>({
           id:tid, name:t.name, color:t.color,
           members: t.memberIds.size,
         })) : null,
+        domTimeLeft: room.mode==='domination' ? Math.max(0, room.domRoundEnd - Date.now()) : null,
       });
     }
     return list;
