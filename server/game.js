@@ -413,6 +413,7 @@ class Room {
       boostAccum:0,botTimer:0,botWanderAngle:angle,
       teamId:-1, // -1 = no team (solo mode)
       role:-1,   // -1 = no role; Zone Domination assigns Scout/Defender/Collector/Commander
+      evasion:1, // 1 = full collision-dodging; lower = reacts later (easier to KO)
       invincible:2, // 2 seconds of spawn invincibility
       kills:0,
     };
@@ -759,6 +760,10 @@ class Room {
     snake.teamId = minTeam;
     this.teams.get(minTeam).memberIds.add(snake.id);
     snake.role = Math.floor(Math.random()*4);
+    // Half the squad keeps sharp reflexes; the other half reacts later, so a
+    // well-timed cut-off actually lands. Keeps fights winnable without making
+    // bots suicidal.
+    snake.evasion = Math.random() < 0.5 ? 1 : 0.6;
     this._domPlaceAtHome(snake);
   }
 
@@ -1366,10 +1371,13 @@ class Room {
   _emergencyAvoid(s, dt) {
     const h = s.segments[0];
     const speed = s.boosting ? BOOST_SPEED : SNAKE_SPEED;
-    const lookAhead = speed * 0.18;
+    // evasion < 1 → shorter look-ahead & tighter danger radius, so the bot
+    // reacts later and is easier to cut off (used for "easier-to-KO" bots).
+    const ev = s.evasion ?? 1;
+    const lookAhead = speed * 0.18 * ev;
     const px = h.x + Math.cos(s.angle) * lookAhead;
     const py = h.y + Math.sin(s.angle) * lookAhead;
-    const dangerR = HEAD_RADIUS * this._thickness(s) + 22;
+    const dangerR = (HEAD_RADIUS * this._thickness(s) + 22) * ev;
     const dangerR2 = dangerR * dangerR;
     let blocked = false, closestT = Infinity;
     for (const [, o] of this.snakes) {
@@ -1390,7 +1398,7 @@ class Room {
         const oh = o.segments[0];
         const dx = oh.x - h.x, dy = oh.y - h.y;
         const d = Math.sqrt(dx*dx + dy*dy);
-        if (d < 220) {
+        if (d < 220 * ev) {
           const myDir = { x: Math.cos(s.angle), y: Math.sin(s.angle) };
           const theirDir = { x: Math.cos(o.angle), y: Math.sin(o.angle) };
           const toThem = { x: dx / d, y: dy / d };
