@@ -1487,14 +1487,12 @@
   const RED_BLUE_TEAMS = [{ id:0, name:'Red', color:'#ff3b3b', members:0 },
                           { id:1, name:'Blue', color:'#3b82f6', members:0 }];
   function playZoneDominationVsAI() {
-    // 'room-4' is the standing Zone Domination room; open the role/team picker
-    // instantly (bots fill both teams). pendingMode='domination' makes the join
-    // send the role even though we skip the room-list fetch.
-    showTeamSelector('room-4', RED_BLUE_TEAMS, 'domination');
+    // Offline (local engine) — pick role + team, then play vs bots. No server.
+    showTeamSelector('local', RED_BLUE_TEAMS, 'domination', true);
   }
   function playCaptureTheOrbVsAI() {
-    // 'room-5' is the standing Capture the Orb room (bots fill both teams).
-    showTeamSelector('room-5', RED_BLUE_TEAMS, 'ctf');
+    // Offline (local engine) — pick a team, then play vs bots. No server.
+    showTeamSelector('local', RED_BLUE_TEAMS, 'ctf', true);
   }
   playAIBtn.addEventListener('click', onPlayAI);
   nameInput.addEventListener('keydown', (e) => { if (e.key==='Enter') onPlayAI(); });
@@ -1607,8 +1605,14 @@
     myKills = 0; displayScore = 0; prevScore = 0; scorePopups = []; killFeed = [];
     lifeStartTime = performance.now(); foodEaten = 0; peakScore = 0; emoteDisplays = [];
     freezeTimer = 0; spectateTimer = 0; spectateTarget = null; lastKillerPos = null;
+    // Reset any team-mode render state from a previous game.
+    mpDom = null; domLayout = null; domBanner = null; mpCtf = null; ctfLayout = null; ctfBanner = null; ctfAlert = null;
+    domStateById = new Map(); domZoneById = new Map(); domTeamById = new Map(); ctfTeamById = new Map(); ctfBaseByTeam = new Map();
     const name = nameInput.value.trim() || 'Player';
-    localGame = new LocalGame(name, selectedSkin, selectedLocalMode);
+    const teamCfg = (selectedLocalMode === 'domination' || selectedLocalMode === 'ctf')
+      ? { team: selectedTeamId >= 0 ? selectedTeamId : 0, role: selectedRole } : {};
+    if (selectedLocalMode !== 'domination' && selectedLocalMode !== 'ctf') selectedTeamId = -1;
+    localGame = new LocalGame(name, selectedSkin, selectedLocalMode, teamCfg);
     myId = localGame.playerId;
     localGame.onPlayerDeath((score, rank) => {
       saveBestScore(score);
@@ -1825,9 +1829,11 @@
   let selectedTeamId = -1;
 
   let pendingMode = 'team';
-  function showTeamSelector(roomId, teams, mode) {
+  let pendingLocal = false; // true → launch an OFFLINE local game after picking team/role
+  function showTeamSelector(roomId, teams, mode, local) {
     pendingRoomId = roomId;
     pendingMode = mode || 'team';
+    pendingLocal = !!local;
     hideAllScreens();
     teamScreen.style.display = 'flex';
     // Retitle the screen for domination (role + team)
@@ -1888,7 +1894,8 @@
         <div class="team-count">${label}</div>`;
       card.addEventListener('click', () => {
         selectedTeamId = team.id;
-        startMultiplayerGame(pendingRoomId, team.id);
+        if (pendingLocal) startLocalGame();          // offline "Play vs AI" team game
+        else startMultiplayerGame(pendingRoomId, team.id);
       });
       teamGrid.appendChild(card);
     }
@@ -4490,6 +4497,22 @@
           : Math.atan2(mouseY-canvas.height/2, mouseX-canvas.width/2);
         localGame.setPlayerInput(angle, boosting);
         localGame.tick(gameDt);
+        // Team modes: mirror the local sim into the same globals the renderer
+        // already uses for multiplayer, so all zone/orb/HUD/minimap drawing works.
+        if (localGame.mode === 'domination') {
+          domLayout = localGame.getDominationLayout();
+          mpDom = localGame.getDominationState();
+          domZoneById = new Map(domLayout.zones.map(z => [z.id, z]));
+          domTeamById = new Map(domLayout.teams.map(t => [t.id, t]));
+          domStateById = new Map(mpDom.zones.map(z => [z.id, z]));
+          for (const ev of localGame.drainDomEvents()) pushDomEventBanner(ev);
+        } else if (localGame.mode === 'ctf') {
+          ctfLayout = localGame.getCtfLayout();
+          mpCtf = localGame.getCtfState();
+          ctfTeamById = new Map(ctfLayout.teams.map(t => [t.id, t]));
+          ctfBaseByTeam = new Map(ctfLayout.bases.map(b => [b.team, b]));
+          for (const ev of localGame.drainCtfEvents()) pushCtfEvent({ t:'ctfEvent', type:ev.type, team:ev.team, by:ev.by });
+        }
         prevSnakes = snakes;
         snakes = localGame.snakes.filter(s => s.alive);
         // Tag new food with spawnTime for spawn-in animation
@@ -4540,14 +4563,25 @@
           myScoreEl.textContent = `Score: ${Math.round(displayScore)} | Kills: ${myKills}`;
           lastScore = me.score;
         }
-        // Update leaderboard
-        const sorted = localGame.snakes.filter(s=>s.alive).sort((a,b)=>b.score-a.score).slice(0,10);
+        // Update leaderboard — team standings for team modes, else per-snake.
         leaderboardEntries.innerHTML='';
-        for(const s of sorted){
-          const div=document.createElement('div');
-          div.className='entry'+(s.id===myId?' me':'');
-          div.innerHTML=`<span>${s.name}</span><span>${s.score}</span>`;
-          leaderboardEntries.appendChild(div);
+        if (localGame.mode === 'domination' || localGame.mode === 'ctf') {
+          const ts = localGame.teams.map(t => ({ name:t.name, score: localGame.mode==='ctf' ? (t.ctfScore||0) : Math.round(t.domScore), id:t.id }))
+            .sort((a,b)=>b.score-a.score);
+          for (const t of ts) {
+            const div=document.createElement('div');
+            div.className='entry'+(t.id===selectedTeamId?' me':'');
+            div.innerHTML=`<span>${t.name}</span><span>${t.score}</span>`;
+            leaderboardEntries.appendChild(div);
+          }
+        } else {
+          const sorted = localGame.snakes.filter(s=>s.alive).sort((a,b)=>b.score-a.score).slice(0,10);
+          for(const s of sorted){
+            const div=document.createElement('div');
+            div.className='entry'+(s.id===myId?' me':'');
+            div.innerHTML=`<span>${s.name}</span><span>${s.score}</span>`;
+            leaderboardEntries.appendChild(div);
+          }
         }
         playerCountEl.textContent=`Players: ${localGame.snakes.filter(s=>s.alive).length}`;
       } else if (gameMode==='multiplayer') {
