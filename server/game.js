@@ -60,6 +60,10 @@ const BOT_NAMES = [
 
 const TEAM_COLORS = ['#0ff','#f44','#0f0','#ff0','#f0f','#f80','#08f','#8f0'];
 const TEAM_NAMES_DEFAULT = ['Cyan','Red','Green','Gold','Pink','Orange','Blue','Lime'];
+// Zone Domination uses a high-contrast Red vs Blue palette (Green/Gold for 3-4
+// teams) — 6-digit hex so the client's shading helpers work cleanly.
+const DOM_TEAM_NAMES = ['Red','Blue','Green','Gold'];
+const DOM_TEAM_COLORS = ['#ff3b3b','#3b82f6','#3fb950','#f5c518'];
 
 // =====================================================
 // ZONE DOMINATION configuration
@@ -86,8 +90,8 @@ const DOM_HOME_RADIUS = 1180;
 const DOM_RESOURCE_RADIUS = 960;
 
 const DOM_CAPTURE_RATE = 24;         // capture progress/sec at capture-weight 1 (neutral → owned)
-const DOM_NEUTRALIZE_RATE = 30;      // progress/sec lost while an enemy stands on an owned zone
-const DOM_DEFENDER_RESIST = 0.5;     // a Defender on a friendly zone halves enemy neutralize rate
+const DOM_NEUTRALIZE_RATE = 30;      // progress/sec lost while an enemy stands on an UNDEFENDED owned zone
+const DOM_DEFENDER_GRACE_MS = 3000;  // a Defender keeps the zone locked for this long after stepping out
 const DOM_DECAY_RATE = 10;           // contested/abandoned capture bleeds back toward 0 at this rate
 
 const DOM_MAX_LEVEL = 5;
@@ -194,10 +198,11 @@ class Room {
     const numTeams = this.mode === 'domination'
       ? Math.max(2, Math.min(opts.numTeams || DOM_TEAMS_DEFAULT, 4))
       : (this.mode === 'team' ? Math.min(this.maxTeams, 8) : 0);
+    const isDom = this.mode === 'domination';
     for (let i = 0; i < numTeams; i++) {
       this.teams.set(i, {
-        name: TEAM_NAMES_DEFAULT[i] || `Team ${i+1}`,
-        color: TEAM_COLORS[i] || '#fff',
+        name: (isDom ? DOM_TEAM_NAMES[i] : TEAM_NAMES_DEFAULT[i]) || `Team ${i+1}`,
+        color: (isDom ? DOM_TEAM_COLORS[i] : TEAM_COLORS[i]) || '#fff',
         memberIds: new Set(),
         domScore: 0,    // Zone Domination cumulative team score
         resources: 0,   // Zone Domination team economy
@@ -709,6 +714,7 @@ class Room {
           coreOffline: false,
           coreSab: 0,                            // 0..1 enemy sabotage progress
           hotspotUntil: 0,
+          defendGraceUntil: 0,                   // Defender sticky-lock expiry
           adj: [],
         });
       }
@@ -809,13 +815,28 @@ class Room {
 
   _domRelocateZones() {
     // Shuffle the contestable board: move every non-home, non-VIP zone to a
-    // fresh uniform spot and reset it to neutral. Homes & the VIP hold position.
+    // fresh spot and reset it to neutral. Homes & the VIP hold position. New
+    // positions are spaced so no two zones ever overlap (rejection sampling).
+    const placed = this.zones.filter(z => z.type === ZONE_HOME || z.type === ZONE_VIP);
+    const GAP = 320; // clear space between zone edges
     for (const z of this.zones) {
       if (z.type === ZONE_HOME || z.type === ZONE_VIP) continue;
-      const p = this._uniformPos(1300);
-      z.x = Math.round(p.x); z.y = Math.round(p.y);
+      let bestX = z.x, bestY = z.y, bestSep = -Infinity;
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const p = this._uniformPos(z.radius + 200);
+        let minSep = Infinity;
+        for (const o of placed) {
+          const dx = p.x - o.x, dy = p.y - o.y;
+          const sep = Math.sqrt(dx*dx + dy*dy) - o.radius - z.radius; // edge-to-edge gap
+          if (sep < minSep) minSep = sep;
+        }
+        if (minSep > bestSep) { bestSep = minSep; bestX = p.x; bestY = p.y; }
+        if (minSep >= GAP) break; // good enough — clear of every other zone
+      }
+      z.x = Math.round(bestX); z.y = Math.round(bestY);
       z.owner = -1; z.progress = 0; z.level = 0; z.holdTime = 0; z.capturingTeam = -1;
-      z.coreOffline = false; z.coreSab = 0; z.hotspotUntil = 0;
+      z.coreOffline = false; z.coreSab = 0; z.hotspotUntil = 0; z.defendGraceUntil = 0;
+      placed.push(z);
     }
     this._domComputeAdjacency();
     this.domLayoutVersion++;
@@ -899,10 +920,21 @@ class Room {
         }
       }
 
+      // A Defender of the owner keeps the zone locked for a grace window even
+      // after stepping out, rewarding stationing one to hold ground.
+      if (z.owner >= 0 && ownerPresent && defenders.has(z.owner)) z.defendGraceUntil = now + DOM_DEFENDER_GRACE_MS;
+      // While ANY owning-team player is in the zone (or a Defender's grace is
+      // active), it is LOCKED — enemies cannot neutralize or capture it at all.
+      const locked = z.owner >= 0 && (ownerPresent || now < (z.defendGraceUntil || 0));
+
       if (z.type === ZONE_HOME) {
         z.owner = z.homeTeam; z.progress = 100; z.level = Math.max(1, z.level);
+      } else if (locked) {
+        z.progress = 100; z.capturingTeam = -1; z.holdTime += dt;
+        const tgt = Math.min(DOM_MAX_LEVEL, 1 + Math.floor(z.holdTime / DOM_LEVEL_HOLD_SEC));
+        if (tgt > z.level) z.level = tgt;
       } else {
-        // Dominant present team (near-ties count as contested)
+        // Owner not present (or neutral). Resolve among present teams.
         let topTeam = -1, topW = 0, second = 0, present = 0;
         for (const [tid, w] of weight) { present++; if (w > topW) { second = topW; topW = w; topTeam = tid; } else if (w > second) second = w; }
         const contested = present > 1 && (topW - second) < 0.5;
@@ -917,23 +949,19 @@ class Room {
           }
         } else if (contested) {
           if (z.owner < 0) z.progress = Math.max(0, z.progress - DOM_DECAY_RATE*0.5*dt);
-        } else if (z.owner === topTeam) {
-          z.progress = 100; z.capturingTeam = -1; z.holdTime += dt;
-          const tgt = Math.min(DOM_MAX_LEVEL, 1 + Math.floor(z.holdTime / DOM_LEVEL_HOLD_SEC));
-          if (tgt > z.level) z.level = tgt;
         } else if (z.owner < 0) {
+          // Neutral → capture toward topTeam. More friendly players = more topW = faster.
           z.capturingTeam = topTeam;
           z.progress += DOM_CAPTURE_RATE * topW * captureMult * dt;
-          if (z.progress >= 100) { z.owner = topTeam; z.progress = 100; z.level = 1; z.holdTime = 0; z.coreOffline = false; z.coreSab = 0; }
+          if (z.progress >= 100) { z.owner = topTeam; z.progress = 100; z.level = 1; z.holdTime = 0; z.coreOffline = false; z.coreSab = 0; z.defendGraceUntil = 0; }
         } else if (!z.hasCore || z.coreOffline) {
-          // Enemy-owned and capturable: neutralize toward 0, then it flips neutral.
-          const rate = DOM_NEUTRALIZE_RATE * topW * captureMult * (defenders.has(z.owner) ? DOM_DEFENDER_RESIST : 1);
-          z.progress -= rate * dt;
+          // Enemy-owned, owner absent, core down/none → neutralize toward 0 first,
+          // then it flips neutral and the same team can recapture it.
+          z.progress -= DOM_NEUTRALIZE_RATE * topW * captureMult * dt;
           z.capturingTeam = topTeam;
-          if (z.progress <= 0) { z.owner = -1; z.progress = 0; z.level = 0; z.holdTime = 0; z.coreOffline = false; z.coreSab = 0; }
+          if (z.progress <= 0) { z.owner = -1; z.progress = 0; z.level = 0; z.holdTime = 0; z.coreOffline = false; z.coreSab = 0; z.defendGraceUntil = 0; }
         } else {
-          // Fortified: an intact core shields the zone — no capture progress until
-          // the core is sabotaged offline (handled in the core block above).
+          // Fortified: an intact core shields the zone — sabotage it first (core block).
           z.capturingTeam = topTeam;
         }
       }

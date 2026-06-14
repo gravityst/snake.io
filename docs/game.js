@@ -1059,7 +1059,15 @@
 
   // --- Helpers ---
   function hexFull(c) { if (c.length===4) return '#'+c[1]+c[1]+c[2]+c[2]+c[3]+c[3]; return c; }
-  function getSegColor(snake, i) { const skin = SKINS[snake.skin]||SKINS[0]; return skin.colors[i%skin.colors.length]; }
+  function getSegColor(snake, i) {
+    // Zone Domination: color every snake by its team so red vs blue reads at a
+    // glance. Banded (base / darker shade) keeps a little body texture.
+    if (domLayout && mpDom && snake.teamId >= 0) {
+      const base = domTeamColor(snake.teamId);
+      return (i % 4 < 2 || base.length !== 7) ? base : darken(base, 0.26);
+    }
+    const skin = SKINS[snake.skin]||SKINS[0]; return skin.colors[i%skin.colors.length];
+  }
   // Logarithmic — never caps, but slows down. 0→1.0, 100→1.48, 500→1.85, 2000→2.20, 10000→2.60
   function getThickness(snake) { return 1 + Math.sqrt(snake.score) / 45 + snake.score / 8000; }
 
@@ -1090,8 +1098,10 @@
   function applyModeSelection() {
     const cm = document.getElementById('classicModeBtn');
     const rm = document.getElementById('royaleModeBtn');
+    const dm = document.getElementById('dominationModeBtn');
     if (cm) cm.classList.toggle('active', selectedLocalMode === 'classic');
     if (rm) rm.classList.toggle('active', selectedLocalMode === 'royale');
+    if (dm) dm.classList.toggle('active', selectedLocalMode === 'domination');
     localStorage.setItem('selectedLocalMode', selectedLocalMode);
   }
   // --- Game state (must be declared before frame loop touches them) ---
@@ -1427,14 +1437,34 @@
   // =====================================================
   const classicModeBtn = document.getElementById('classicModeBtn');
   const royaleModeBtn = document.getElementById('royaleModeBtn');
+  const dominationModeBtn = document.getElementById('dominationModeBtn');
   if (classicModeBtn && royaleModeBtn) {
     classicModeBtn.addEventListener('click', () => { selectedLocalMode = 'classic'; applyModeSelection(); });
     royaleModeBtn.addEventListener('click', () => { selectedLocalMode = 'royale'; applyModeSelection(); });
   }
+  if (dominationModeBtn) {
+    dominationModeBtn.addEventListener('click', () => { selectedLocalMode = 'domination'; applyModeSelection(); });
+  }
   applyModeSelection();
   updateProgressPanel();
 
-  playAIBtn.addEventListener('click', startLocalGame);
+  // Classic & Battle Royale run on the offline engine. Zone Domination is a
+  // team mode, so "play vs AI" drops you into the server's bot-filled
+  // Domination room (the bots are the AI opponents).
+  function onPlayAI() {
+    if (selectedLocalMode === 'domination') { playZoneDominationVsAI(); return; }
+    startLocalGame();
+  }
+  function playZoneDominationVsAI() {
+    // 'room-4' is the standing Zone Domination room; open the role/team picker
+    // instantly (bots fill both teams). pendingMode='domination' makes the join
+    // send the role even though we skip the room-list fetch.
+    showTeamSelector('room-4',
+      [{ id:0, name:'Red',  color:'#ff3b3b', members:0 },
+       { id:1, name:'Blue', color:'#3b82f6', members:0 }],
+      'domination');
+  }
+  playAIBtn.addEventListener('click', onPlayAI);
   nameInput.addEventListener('keydown', (e) => { if (e.key==='Enter') startLocalGame(); });
   respawnBtn.addEventListener('click', () => {
     if (gameMode==='local') startLocalGame();
@@ -1907,7 +1937,9 @@
     // Track whether the room we're joining is BR (room data was last cached)
     const cached = (lastRoomData || []).find(r => r.id === roomId);
     intendedBR = !!(cached && cached.mode === 'royale');
-    intendedDom = !!(cached && cached.mode === 'domination');
+    // pendingMode covers the "Play vs AI → Zone Domination" path where the room
+    // list may not be cached yet — ensures the role byte still gets sent.
+    intendedDom = !!(cached && cached.mode === 'domination') || pendingMode === 'domination';
     if (brHandshakeTimer) { clearTimeout(brHandshakeTimer); brHandshakeTimer = null; }
     if (domHandshakeTimer) { clearTimeout(domHandshakeTimer); domHandshakeTimer = null; }
     if (intendedDom) {
@@ -3373,6 +3405,48 @@
     }
 
     ctx.restore();
+
+    // In-zone capture bar — clear, prominent feedback while you stand in a zone
+    const meDom = snakes.find(s => s.id === myId);
+    if (mpDom.state !== 'ended' && meDom && meDom.alive && meDom.segments.length) {
+      const hx = meDom.segments[0].x, hy = meDom.segments[0].y;
+      let zoneIn = null;
+      for (const z of domLayout.zones) {
+        if (z.type === ZONE_HOME) continue;
+        const dx = hx - z.x, dy = hy - z.y;
+        if (dx*dx + dy*dy <= z.r*z.r) { zoneIn = z; break; }
+      }
+      if (zoneIn) {
+        const zs = domStateById.get(zoneIn.id) || { o:-1, p:0, cap:-1, core:0 };
+        const myT = selectedTeamId;
+        const coreUp = zoneIn.core && zs.core !== 2;
+        let label, frac, barColor;
+        if (zs.o === myT) { label = 'HOLDING'; frac = 1; barColor = domTeamColor(myT); }
+        else if (zs.o >= 0 && coreUp) { label = 'DISABLE THE CORE FIRST'; frac = zs.core === 1 ? 0.5 : 0.02; barColor = '#ffb070'; }
+        else if (zs.cap === myT) {
+          if (zs.o < 0) { label = 'CAPTURING'; frac = zs.p/100; }
+          else { label = 'NEUTRALIZING'; frac = (100 - zs.p)/100; }
+          barColor = domTeamColor(myT);
+        } else if (zs.o >= 0) { label = 'ENEMY HELD — CLEAR THEM OUT'; frac = zs.p/100; barColor = domTeamColor(zs.o); }
+        else { label = zs.cap >= 0 ? 'CONTESTED' : 'NEUTRAL'; frac = zs.p/100; barColor = zs.cap >= 0 ? domTeamColor(zs.cap) : '#9fb3c8'; }
+        frac = Math.max(0, Math.min(1, frac));
+        const tag = zoneIn.type === ZONE_VIP ? '  ·  VIP' : zoneIn.type === ZONE_RESOURCE ? '  ·  RESOURCE' : '';
+        const bw = 300, bh = 22, bx = W/2 - bw/2, by = H * 0.7;
+        ctx.save();
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = "800 12px 'Inter',sans-serif"; ctx.fillStyle = barColor;
+        ctx.fillText(label + tag, W/2, by - 13);
+        ctx.fillStyle = 'rgba(8,12,28,0.85)'; ctx.strokeStyle = hexA(barColor, 0.7);
+        roundRect(ctx, bx, by, bw, bh, 7); ctx.fill(); ctx.lineWidth = 1.4; ctx.stroke();
+        ctx.save(); roundRect(ctx, bx, by, bw, bh, 7); ctx.clip();
+        ctx.fillStyle = barColor; ctx.globalAlpha = 0.55; ctx.shadowColor = barColor; ctx.shadowBlur = 12;
+        ctx.fillRect(bx, by, bw * frac, bh);
+        ctx.restore();
+        ctx.fillStyle = '#eef5ff'; ctx.font = "700 11px 'Inter',sans-serif";
+        ctx.fillText(Math.round(frac * 100) + '%', W/2, by + bh/2 + 1);
+        ctx.restore();
+      }
+    }
 
     // Big event banner (center flash)
     if (domBanner) {
