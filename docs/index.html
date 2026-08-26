@@ -4,53 +4,62 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%235eead4'/><circle cx='11' cy='13' r='3' fill='white'/><circle cx='21' cy='13' r='3' fill='white'/><circle cx='11.8' cy='13.5' r='1.5' fill='%23111'/><circle cx='21.8' cy='13.5' r='1.5' fill='%23111'/></svg>">
-  <title>Snake.io</title>
+  <title>Gravity Snake</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Manrope:wght@400;500;600;700;800&family=Sora:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
     /* =================================================================
        Design tokens
        ================================================================= */
     :root {
+      /* ---------------------------------------------------------------
+         "Obsidian" - near-black with a warm cast. One molten accent used
+         sparingly. Depth comes from value steps and a one-pixel lit top
+         edge; there is no glow, no gradient ground, no backdrop blur.
+         Token NAMES are unchanged so every rule below keeps working.
+         --------------------------------------------------------------- */
       /* Surfaces */
-      --bg-base:     #0a0d1f;
-      --bg-deep:     #06081a;
-      --surface:     rgba(22, 27, 52, 0.55);
-      --surface-2:   rgba(28, 35, 65, 0.75);
-      --surface-3:   rgba(40, 50, 90, 0.85);
-      --border:      rgba(120, 140, 200, 0.10);
-      --border-mid:  rgba(120, 140, 200, 0.20);
-      --border-hi:   rgba(160, 180, 230, 0.45);
+      --bg-base:     #0a0a0c;
+      --bg-deep:     #08080a;
+      --surface:     rgba(20, 20, 24, 0.92);
+      --surface-2:   rgba(28, 28, 34, 0.95);
+      --surface-3:   #232329;
+      --border:      rgba(255, 255, 255, 0.07);
+      --border-mid:  rgba(255, 255, 255, 0.13);
+      --border-hi:   rgba(255, 122, 26, 0.55);
       /* Text */
-      --text:        #f1f5f9;
-      --text-soft:   #cbd5e1;
-      --text-muted:  #94a3b8;
-      --text-dim:    #64748b;
-      /* Accents */
-      --teal:        #5eead4;
-      --teal-soft:   rgba(94, 234, 212, 0.18);
-      --teal-glow:   rgba(94, 234, 212, 0.35);
-      --violet:      #a78bfa;
-      --violet-soft: rgba(167, 139, 250, 0.18);
-      --violet-glow: rgba(167, 139, 250, 0.35);
-      --amber:       #fbbf24;
-      --amber-soft:  rgba(251, 191, 36, 0.16);
-      --rose:        #fb7185;
-      --rose-soft:   rgba(251, 113, 133, 0.16);
-      --lime:        #86efac;
-      --lime-soft:   rgba(134, 239, 172, 0.16);
-      /* Effects */
-      --shadow-card: 0 12px 40px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.25);
-      --shadow-pop:  0 20px 60px rgba(0,0,0,0.55), 0 4px 14px rgba(0,0,0,0.35);
-      --radius-sm:   8px;
-      --radius:      14px;
-      --radius-lg:   20px;
-      --radius-xl:   28px;
+      --text:        #f6f4f1;
+      --text-soft:   #d6d2cc;
+      --text-muted:  #96928c;
+      --text-dim:    #6a6660;
+      /* Accents - teal was the brand accent, so it becomes the molten one.
+         The rest stay semantically separate but move warm/neutral. */
+      --teal:        #ff7a1a;
+      --teal-soft:   rgba(255, 122, 26, 0.14);
+      --teal-glow:   rgba(255, 122, 26, 0.20);
+      --violet:      #ffce8f;
+      --violet-soft: rgba(255, 206, 143, 0.13);
+      --violet-glow: rgba(255, 206, 143, 0.16);
+      --amber:       #ffb020;
+      --amber-soft:  rgba(255, 176, 32, 0.14);
+      --rose:        #f0533d;
+      --rose-soft:   rgba(240, 83, 61, 0.14);
+      --lime:        #4ade80;
+      --lime-soft:   rgba(74, 222, 128, 0.14);
+      /* Effects - flatter, tighter, no coloured haze */
+      --shadow-card: 0 10px 30px rgba(0,0,0,0.55), 0 1px 3px rgba(0,0,0,0.4);
+      --shadow-pop:  0 18px 48px rgba(0,0,0,0.65), 0 2px 8px rgba(0,0,0,0.45);
+      --lit:         inset 0 1px 0 rgba(255,255,255,0.07);
+      --radius-sm:   4px;
+      --radius:      6px;
+      --radius-lg:   8px;
+      --radius-xl:   10px;
       /* Motion */
-      --t-fast:      120ms cubic-bezier(0.4, 0, 0.2, 1);
-      --t-base:      220ms cubic-bezier(0.4, 0, 0.2, 1);
-      --t-slow:      420ms cubic-bezier(0.4, 0, 0.2, 1);
+      --t-fast:      110ms cubic-bezier(0.4, 0, 0.2, 1);
+      --t-base:      180ms cubic-bezier(0.4, 0, 0.2, 1);
+      --t-slow:      320ms cubic-bezier(0.4, 0, 0.2, 1);
+      --mono:        'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
     }
 
     /* =================================================================
@@ -59,15 +68,17 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: radial-gradient(ellipse at top left, #131638 0%, var(--bg-base) 45%, var(--bg-deep) 100%);
+      font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-weight: 500;
+      /* Flat ground. The radial gradient was the single loudest tell. */
+      background: var(--bg-base);
       color: var(--text);
       overflow: hidden;
       cursor: crosshair;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }
-    .display { font-family: 'Space Grotesk', 'Inter', sans-serif; }
+    .display { font-family: 'Sora', 'Manrope', sans-serif; letter-spacing: -0.03em; }
 
     #game {
       display: block;
@@ -114,23 +125,23 @@
     .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
 
     .btn-primary {
-      background: linear-gradient(135deg, #5eead4 0%, #38bdf8 100%);
+      background: var(--teal);
       border-color: transparent;
       color: #062d2a;
       font-weight: 700;
       box-shadow: 0 8px 24px var(--teal-glow), inset 0 1px 0 rgba(255,255,255,0.4);
     }
-    .btn-primary:hover { background: linear-gradient(135deg, #6df0d8 0%, #4ec6fa 100%); color: #062d2a; box-shadow: 0 12px 36px var(--teal-glow), inset 0 1px 0 rgba(255,255,255,0.5); }
+    .btn-primary:hover { background: var(--teal); color: #062d2a; box-shadow: 0 12px 36px var(--teal-glow), inset 0 1px 0 rgba(255,255,255,0.5); }
     .btn-primary svg { stroke: #062d2a; }
 
     .btn-violet {
-      background: linear-gradient(135deg, #a78bfa 0%, #d8b4fe 100%);
+      background: var(--surface-2);
       border-color: transparent;
       color: #20104a;
       font-weight: 700;
       box-shadow: 0 8px 24px var(--violet-glow), inset 0 1px 0 rgba(255,255,255,0.4);
     }
-    .btn-violet:hover { background: linear-gradient(135deg, #b69bff 0%, #e3c4ff 100%); color: #20104a; }
+    .btn-violet:hover { background: var(--surface-3); color: #20104a; }
     .btn-violet svg { stroke: #20104a; }
 
     .btn-ghost {
@@ -141,12 +152,12 @@
     .btn-ghost:hover { background: var(--surface); color: var(--text); border-color: var(--border-hi); }
 
     .btn-rose {
-      background: linear-gradient(135deg, #fb7185 0%, #f43f5e 100%);
+      background: var(--surface-2);
       border-color: transparent;
       color: #fff;
       box-shadow: 0 8px 24px rgba(251,113,133,0.35);
     }
-    .btn-rose:hover { background: linear-gradient(135deg, #fc8395 0%, #f55a73 100%); }
+    .btn-rose:hover { background: var(--surface-3); }
 
     .btn-sm { padding: 9px 18px; font-size: 13px; }
     .btn-lg { padding: 16px 36px; font-size: 17px; font-weight: 700; }
@@ -186,7 +197,7 @@
       background-position: right 18px center;
       padding-right: 40px;
     }
-    .select option { background: #0a0d1f; color: var(--text); }
+    .select option { background: #0a0a0c; color: var(--text); }
 
     /* =================================================================
        Animated background canvas — sits behind all menu screens
@@ -226,7 +237,7 @@
     #serverStatus .status-text { text-transform: uppercase; font-size: 11px; }
     #serverStatus.status-checking { border-color: rgba(251,191,36,0.4); }
     #serverStatus.status-checking svg { color: var(--amber); animation: spin 1s linear infinite; }
-    #serverStatus.status-online   { border-color: rgba(94,234,212,0.4); }
+    #serverStatus.status-online   { border-color: rgba(255,122,26,0.4); }
     #serverStatus.status-online   svg { color: var(--teal); }
     #serverStatus.status-waking   { border-color: rgba(251,191,36,0.5); }
     #serverStatus.status-waking   svg { color: var(--amber); animation: pulse 1.2s ease-in-out infinite; }
@@ -290,12 +301,12 @@
       margin-bottom: 6px;
     }
     .logo {
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Sora', sans-serif;
       font-size: 72px;
       font-weight: 700;
       letter-spacing: -2px;
       line-height: 1;
-      background: linear-gradient(180deg, #fff 0%, #5eead4 60%, #38bdf8 100%);
+      background: none;
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
@@ -307,8 +318,9 @@
       50%      { filter: drop-shadow(0 0 40px var(--teal-glow)) drop-shadow(0 0 60px var(--violet-glow)); }
     }
     .logo-dot {
-      color: var(--violet);
-      -webkit-text-fill-color: var(--violet);
+      display: block;
+      color: var(--teal);
+      -webkit-text-fill-color: var(--teal);
     }
     .tagline {
       color: var(--text-muted);
@@ -357,7 +369,7 @@
     .mode-tab:hover { color: var(--text-soft); background: var(--surface-2); }
     .mode-tab.active {
       color: #062d2a;
-      background: linear-gradient(135deg, var(--teal), #38bdf8);
+      background: var(--teal);
       box-shadow: 0 4px 14px var(--teal-glow);
     }
     .mode-tab.active .mode-tab-sub { color: rgba(6, 45, 42, 0.7); }
@@ -412,7 +424,7 @@
       margin-bottom: 20px;
     }
     .screen-title {
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Sora', sans-serif;
       font-size: 26px;
       font-weight: 700;
       letter-spacing: -0.5px;
@@ -441,7 +453,7 @@
       background: transparent;
       border: none;
       color: var(--text-muted);
-      font-family: 'Inter', sans-serif;
+      font-family: 'Manrope', sans-serif;
       font-size: 11px;
       font-weight: 700;
       letter-spacing: 0.6px;
@@ -454,9 +466,9 @@
     }
     .filter-tab:hover { color: var(--text); }
     .filter-tab.active {
-      background: linear-gradient(135deg, var(--teal-soft), rgba(94,234,212,0.05));
+      background: linear-gradient(135deg, var(--teal-soft), rgba(255,122,26,0.05));
       color: var(--teal);
-      box-shadow: 0 0 0 1px rgba(94,234,212,0.35), 0 2px 12px rgba(94,234,212,0.12);
+      box-shadow: 0 0 0 1px rgba(255,122,26,0.35), 0 2px 12px rgba(255,122,26,0.12);
     }
     .filter-tab.active.royale {
       background: linear-gradient(135deg, var(--rose-soft), rgba(251,113,133,0.05));
@@ -491,7 +503,7 @@
       border: none;
       outline: none;
       color: var(--text);
-      font-family: 'Inter', sans-serif;
+      font-family: 'Manrope', sans-serif;
       font-size: 13px;
     }
     .room-search-bar input::placeholder { color: var(--text-muted); }
@@ -557,7 +569,7 @@
       border-radius: 12px;
       display: flex; align-items: center; justify-content: center;
       flex-shrink: 0;
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Sora', sans-serif;
       font-size: 18px;
       font-weight: 800;
       letter-spacing: 0.5px;
@@ -610,9 +622,9 @@
       border-radius: 999px;
       flex-shrink: 0;
     }
-    .mode-badge.solo   { background: var(--teal-soft); color: var(--teal); border: 1px solid rgba(94,234,212,0.35); }
+    .mode-badge.solo   { background: var(--teal-soft); color: var(--teal); border: 1px solid rgba(255,122,26,0.35); }
     .mode-badge.team   { background: var(--amber-soft); color: var(--amber); border: 1px solid rgba(251,191,36,0.35); }
-    .mode-badge.custom { background: var(--violet-soft); color: var(--violet); border: 1px solid rgba(167,139,250,0.35); }
+    .mode-badge.custom { background: var(--violet-soft); color: var(--violet); border: 1px solid rgba(255,206,143,0.35); }
     .mode-badge.royale { background: var(--rose-soft); color: var(--rose); border: 1px solid rgba(251,113,133,0.4); }
     .mode-badge.live   {
       background: rgba(251,113,133,0.15); color: var(--rose);
@@ -633,7 +645,7 @@
       min-width: 70px;
     }
     .room-fill-count {
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Sora', sans-serif;
       font-size: 16px;
       font-weight: 800;
       color: var(--text);
@@ -662,9 +674,9 @@
     }
 
     .copy-code-pill {
-      background: rgba(167,139,250,0.12);
+      background: rgba(255,206,143,0.12);
       color: var(--violet);
-      border: 1px solid rgba(167,139,250,0.30);
+      border: 1px solid rgba(255,206,143,0.30);
       border-radius: 999px;
       padding: 3px 9px;
       font-size: 10px;
@@ -675,7 +687,7 @@
       transition: all 0.15s ease;
     }
     .copy-code-pill:hover {
-      background: rgba(167,139,250,0.22);
+      background: rgba(255,206,143,0.22);
       transform: scale(1.04);
     }
 
@@ -786,7 +798,7 @@
       max-width: 100%;
       height: 160px;
       border-radius: var(--radius);
-      background: radial-gradient(ellipse at center, rgba(94,234,212,0.05) 0%, transparent 60%), var(--bg-deep);
+      background: radial-gradient(ellipse at center, rgba(255,122,26,0.05) 0%, transparent 60%), var(--bg-deep);
       border: 1px solid var(--border);
       margin-bottom: 16px;
     }
@@ -817,7 +829,7 @@
     .tab-btn:hover { color: var(--text-soft); }
     .tab-btn.active {
       color: #062d2a;
-      background: linear-gradient(135deg, var(--teal), #38bdf8);
+      background: var(--teal);
       box-shadow: 0 4px 12px var(--teal-glow);
     }
     .tab-panel { display: none; flex-direction: column; align-items: center; }
@@ -934,7 +946,7 @@
     }
     #deathScreen .panel { text-align: center; max-width: 400px; }
     .death-title {
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Sora', sans-serif;
       font-size: 44px;
       font-weight: 700;
       letter-spacing: -1px;
@@ -955,7 +967,7 @@
       color: var(--text);
       font-size: 22px;
       font-weight: 700;
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Sora', sans-serif;
       margin-left: 6px;
     }
     .death-stats {
@@ -973,7 +985,7 @@
       text-align: center;
     }
     .death-stat .stat-value {
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Sora', sans-serif;
       font-size: 24px;
       font-weight: 700;
       color: var(--teal);
@@ -1012,7 +1024,7 @@
     }
     #leaderboard h3 {
       color: var(--text-muted);
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Sora', sans-serif;
       font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
@@ -1047,7 +1059,7 @@
       position: absolute;
       bottom: 24px; left: 50%;
       transform: translateX(-50%);
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Sora', sans-serif;
       font-size: 22px;
       font-weight: 700;
       color: var(--text);
@@ -1127,7 +1139,7 @@
       box-shadow: var(--shadow-card);
     }
     #settingsPanel h4 {
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Sora', sans-serif;
       color: var(--text);
       font-size: 14px;
       font-weight: 700;
@@ -1198,11 +1210,11 @@
       cursor: pointer;
       transition: background var(--t-base);
     }
-    .mini-btn:hover { background: rgba(94,234,212,0.28); }
+    .mini-btn:hover { background: rgba(255,122,26,0.28); }
     .mini-btn.warn { border-color: var(--amber); background: var(--amber-soft); color: var(--amber); }
     .mini-btn.warn:hover { background: rgba(251,191,36,0.28); }
     .mini-btn.pink { border-color: var(--violet); background: var(--violet-soft); color: var(--violet); }
-    .mini-btn.pink:hover { background: rgba(167,139,250,0.28); }
+    .mini-btn.pink:hover { background: rgba(255,206,143,0.28); }
     .hint {
       font-size: 11px;
       color: var(--text-soft);
@@ -1249,7 +1261,7 @@
       pointer-events: all;
       transition: background var(--t-base);
     }
-    .copy-code-btn:hover { background: rgba(167,139,250,0.3); }
+    .copy-code-btn:hover { background: rgba(255,206,143,0.3); }
 
     /* Emote wheel */
     .emote-ring { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); }
@@ -1286,7 +1298,7 @@
       background: var(--bg-base);
     }
     #loadingScreen .load-title {
-      font-family: 'Space Grotesk', sans-serif;
+      font-family: 'Sora', sans-serif;
       font-size: 22px;
       font-weight: 700;
       letter-spacing: 3px;
@@ -1325,6 +1337,71 @@
       #serverStatus { top: 12px; right: 12px; padding: 6px 10px; }
       #minimap { width: 110px; height: 110px; }
     }
+
+    /* =================================================================
+       Obsidian finishing pass
+       Hard edges, a lit top pixel instead of a glow, and exactly one
+       saturated control per screen. Appended last so it wins cleanly.
+       ================================================================= */
+    .panel, .room-card, .btn, .skin-card, .team-card, .acc-card,
+    #leaderboard, #myScore, #playerCount, #ping, #minimap, #settingsPanel {
+      box-shadow: var(--lit), var(--shadow-card);
+    }
+    .btn, .room-card, .skin-card, .team-card, .acc-card, .field, .input, .select {
+      border-radius: var(--radius);
+    }
+    .panel { border-radius: var(--radius-lg); }
+    /* Kill every coloured halo - depth is value, not light. */
+    .btn-primary, .btn-primary:hover, .btn-violet, .btn-violet:hover,
+    .btn-rose, .btn-rose:hover, .room-card:hover, .skin-card.selected,
+    .mode-tab.active, .filter-tab.active, .logo {
+      text-shadow: none;
+    }
+    .btn-primary {
+      background: var(--teal);
+      border-color: #ff9440;
+      color: #170a00;
+      font-weight: 700;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), var(--shadow-card);
+    }
+    .btn-primary:hover { background: #ff9440; border-color: #ffa75e; }
+    .btn-primary svg { stroke: currentColor; }
+    /* Secondary actions go quiet so the primary is the only lit thing. */
+    .btn-violet, .btn-rose {
+      background: var(--surface-2);
+      border-color: var(--border-mid);
+      color: var(--text);
+      box-shadow: var(--lit), var(--shadow-card);
+    }
+    .btn-violet:hover, .btn-rose:hover { background: var(--surface-3); }
+    .btn-violet svg { stroke: currentColor; }
+    /* Data reads as data. */
+    #myScore, #ping, #playerCount, .room-fill-count, .team-count,
+    .death-stat .stat-value, .server-badge, .mode-badge, .skin-name,
+    .acc-card .acc-name, .hint code, .copy-code-pill, .copy-code-btn {
+      font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
+    }
+    .logo { font-size: clamp(42px, 7vw, 68px); line-height: 0.94; letter-spacing: -0.042em; }
+    .tagline { letter-spacing: 0; text-transform: none; font-weight: 500; font-size: 14.5px; }
+    #leaderboard .entry.me, #leaderboard .entry.me .score { color: var(--teal); }
+    #myScore { color: var(--teal); }
+    body { cursor: crosshair; }
+    .logo {
+      background: none !important;
+      -webkit-background-clip: initial !important;
+      background-clip: initial !important;
+      -webkit-text-fill-color: var(--text) !important;
+      color: var(--text) !important;
+      text-shadow: none !important;
+      filter: none !important;
+    }
+    .logo .logo-dot { -webkit-text-fill-color: var(--teal) !important; color: var(--teal) !important; }
+    .mode-tab.active { background: var(--surface-3) !important; border-color: var(--border-hi) !important; box-shadow: var(--lit) !important; }
+    .mode-tab.active .mode-tab-title { color: var(--teal) !important; }
+    /* The server-status pill sits top-right; the leaderboard has to clear it. */
+    #leaderboard { top: 54px; }
+    @media (max-width: 540px) { #leaderboard { top: 50px; } }
   </style>
 </head>
 <body>
@@ -1356,7 +1433,7 @@
   <div id="startScreen" class="screen show">
     <div class="panel">
       <div class="logo-wrap">
-        <div class="logo display">SNAKE<span class="logo-dot">.</span>IO</div>
+        <div class="logo display">GRAVITY<span class="logo-dot">SNAKE</span></div>
       </div>
       <p class="tagline">Eat &middot; Grow &middot; Dominate</p>
 
@@ -1613,7 +1690,7 @@
         </p>
         <div id="customColors"></div>
         <div class="color-builder-row">
-          <input type="color" id="colorPicker" value="#5eead4">
+          <input type="color" id="colorPicker" value="var(--teal)">
           <button class="btn btn-primary btn-sm" id="addColorBtn">
             <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
             Add
@@ -1642,7 +1719,7 @@
         background: linear-gradient(135deg, rgba(251,191,36,0.2), rgba(251,113,133,0.15));
         border: 1px solid rgba(251,191,36,0.5);
         border-radius: 999px;
-        font-family: 'Space Grotesk', sans-serif;
+        font-family: 'Sora', sans-serif;
         font-weight: 800;
         font-size: 14px;
         letter-spacing: 0.6px;
