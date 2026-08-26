@@ -20,6 +20,11 @@ const TICK_RATE = 30;
 const TICK_MS = 1000 / TICK_RATE;
 const BROADCAST_RATE = 30;
 const BROADCAST_MS = 1000 / BROADCAST_RATE;
+// Physics runs on a fixed timestep. A dt taken from the wall clock made every
+// tick a slightly different length, which a client cannot interpolate against.
+const FIXED_DT = 1 / TICK_RATE;
+const DRIVER_MS = 4;              // driver granularity; far finer than one tick
+const MAX_CATCHUP_STEPS = 5;      // cap catch-up after a stall so we never spiral
 const MAX_ADVANCED_BOTS = 2;
 const MAX_PLAYERS_PER_ROOM = 30;
 
@@ -297,16 +302,44 @@ class Room {
     if (this.running) return;
     this.running = true;
     this.lastTick = Date.now();
-    this.tickInterval = setInterval(() => this.tick(), TICK_MS);
-    this.broadcastInterval = setInterval(() => {
-      this.broadcastState();
-      this.broadcastLeaderboard();
-      // Royale state at lower freq (every ~6 frames ≈ 5 Hz)
-      if (this.mode === 'royale' && this.tickCount % 6 === 0) this.broadcastRoyaleState();
-      // Zone Domination meta-state at ~5 Hz (JSON text frame)
-      if (this.mode === 'domination' && this.tickCount % 6 === 0) this.broadcastDominationState();
-      if (this.mode === 'ctf' && this.tickCount % 6 === 0) this.broadcastCtfState();
-    }, BROADCAST_MS);
+    this.accumulator = 0;
+    // ONE driver for physics + networking.
+    //
+    // This used to be two independent 30Hz setIntervals. They drift against
+    // each other, so some ticks got broadcast twice (an identical snapshot =>
+    // the snake freezes for a frame) and some tick results were never sent
+    // (=> it jumps two ticks at once). That beat pattern is the stutter.
+    //
+    // The driver deliberately runs faster than the game does: setInterval only
+    // has millisecond resolution, so a 33ms timer chasing a 33.33ms timestep
+    // drifts until one wakeup has to run two steps and ships a double-length
+    // snapshot. At 4ms the accumulator is checked long before it can reach two
+    // steps, so every broadcast carries exactly one tick of movement.
+    this.tickInterval = setInterval(() => this._step(), DRIVER_MS);
+  }
+
+  _step() {
+    const now = Date.now();
+    let elapsed = (now - this.lastTick) / 1000;
+    this.lastTick = now;
+    // A long stall (GC, or CPU steal on a shared host) must not be simulated in
+    // one go - drop the backlog rather than teleporting everybody.
+    if (elapsed > 0.25) elapsed = 0.25;
+    this.accumulator += elapsed;
+    let steps = 0;
+    while (this.accumulator >= FIXED_DT && steps < MAX_CATCHUP_STEPS) {
+      this.tick(FIXED_DT);
+      this.accumulator -= FIXED_DT;
+      steps++;
+    }
+    if (steps === 0) return;   // nothing moved: sending again would be a duplicate
+    this.broadcastState();
+    this.broadcastLeaderboard();
+    // Royale state at lower freq (every ~6 frames ≈ 5 Hz)
+    if (this.mode === 'royale' && this.tickCount % 6 === 0) this.broadcastRoyaleState();
+    // Zone Domination meta-state at ~5 Hz (JSON text frame)
+    if (this.mode === 'domination' && this.tickCount % 6 === 0) this.broadcastDominationState();
+    if (this.mode === 'ctf' && this.tickCount % 6 === 0) this.broadcastCtfState();
   }
 
   _stopLoop() {
@@ -1475,10 +1508,8 @@ class Room {
   }
 
   // --- Main tick ---
-  tick() {
+  tick(dt) {
     const now=Date.now();
-    const dt=Math.min((now-this.lastTick)/1000,0.05);
-    this.lastTick=now;
     this.tickCount++;
     this._royaleTick(now, dt);
     this._domTick(now, dt);

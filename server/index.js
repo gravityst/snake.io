@@ -20,6 +20,9 @@ const cb = createClickBattle();
 
 // WebSocket upgrade routing — /cb path goes to Click Battle, everything else to snake.io
 server.on('upgrade', (req, socket, head) => {
+  // Nagle batches small writes for ~40ms - more than a full tick of added,
+  // jittery latency on every input and every snapshot.
+  socket.setNoDelay(true);
   const path = (req.url || '/').split('?')[0];
   const wss = (path === '/cb' || path.startsWith('/cb/')) ? cb.wss : roomManager.wss;
   wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
